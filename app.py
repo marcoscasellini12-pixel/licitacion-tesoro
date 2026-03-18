@@ -376,77 +376,6 @@ def generar_excel(datos):
     out=io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
-# ── UI ────────────────────────────────────────────────────────────────────────
-st.markdown("## 🏦 Licitación del Tesoro")
-st.markdown("**Banco Hipotecario · Mercado de Capitales**")
-st.markdown("---")
-
-tab1, tab2 = st.tabs(["📋 Llamado", "📊 Resultados"])
-
-with tab1:
-    st.markdown("### Subí el PDF del nuevo llamado")
-    pdf_file = st.file_uploader("📄 PDF del llamado", type=["pdf"], key="llamado")
-    st.markdown("---")
-    if pdf_file:
-        if st.button("⚙️ Generar Excel del Llamado"):
-            with st.spinner("Procesando..."):
-                try:
-                    datos = extraer_pdf(pdf_file.read())
-                    excel_out = generar_excel(datos)
-                    total = sum(len(datos[k]) for k in ["pf","pv","cer","usd"])
-                    st.success(f"✅ {total} instrumentos detectados")
-                    for bq, nm in [("pf","💵 Tasa fija"),("pv","📊 Tasa variable"),("cer","📈 CER"),("usd","💲 Dólares")]:
-                        if datos[bq]:
-                            st.markdown(f"**{nm}**")
-                            for inst in datos[bq]:
-                                v = inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
-                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst[chr(39)+'label'+chr(39)]} — vto. {v}")
-                    if datos["h"]["liq_str"]:
-                        st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
-                    fl = datos["h"]["liq"]
-                    nombre = f"Licitacion_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Licitacion_nueva.xlsx"
-                    st.markdown("---")
-                    st.download_button("⬇️ Descargar Excel", data=excel_out, file_name=nombre,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
-    else:
-        st.info("⬆️ Subí el PDF para habilitar la generación.")
-
-with tab2:
-    st.markdown("### Subí el PDF de resultados")
-    pdf_res = st.file_uploader("📄 PDF de resultados", type=["pdf"], key="resultados")
-    st.markdown("---")
-    if pdf_res:
-        if st.button("⚙️ Generar Excel de Resultados"):
-            with st.spinner("Procesando resultados..."):
-                try:
-                    datos_res = extraer_resultados_pdf(pdf_res.read())
-                    excel_res = generar_excel_resultados(datos_res)
-                    total_insts = sum(len(b["instrumentos"]) for b in datos_res["bloques"])
-                    st.success(f"✅ {total_insts} instrumentos detectados")
-                    for b in datos_res["bloques"]:
-                        st.markdown(f"**{b['titulo']}**")
-                        for inst in b["instrumentos"]:
-                            st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst['label']}")
-                    if datos_res["fecha_liq_str"]:
-                        st.markdown(f"📅 **Liquidación:** {datos_res['fecha_liq_str']}")
-                    fl = datos_res["fecha_lic"]
-                    nombre_res = f"Resultado_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Resultado_nueva.xlsx"
-                    st.markdown("---")
-                    st.download_button("⬇️ Descargar Excel de Resultados", data=excel_res, file_name=nombre_res,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
-    else:
-        st.info("⬆️ Subí el PDF de resultados para habilitar la generación.")
-
-st.markdown("---")
-st.caption("Banco Hipotecario · Mercado de Capitales · Emisiones Primarias")
-
-
-
-
 # ════════════════════════════════════════════════════════════════════════════
 # MÓDULO RESULTADOS
 # ════════════════════════════════════════════════════════════════════════════
@@ -784,3 +713,75 @@ def generar_excel_resultados(datos):
 
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
+
+# ── UI ────────────────────────────────────────────────────────────────────────
+st.markdown("## 🏦 Licitación del Tesoro")
+st.markdown("**Banco Hipotecario · Mercado de Capitales**")
+st.markdown("---")
+
+tab1, tab2 = st.tabs(["📋 Llamado", "📊 Resultados"])
+
+with tab1:
+    st.markdown("### Subí el PDF del nuevo llamado")
+    pdf_file = st.file_uploader("📄 PDF del llamado", type=["pdf"], key="llamado")
+    st.markdown("---")
+    if pdf_file:
+        if st.button("⚙️ Generar Excel del Llamado"):
+            with st.spinner("Procesando..."):
+                try:
+                    datos = extraer_pdf(pdf_file.read())
+                    excel_out = generar_excel(datos)
+                    total = sum(len(datos[k]) for k in ["pf","pv","cer","usd"])
+                    st.success(f"✅ {total} instrumentos detectados")
+                    for bq, nm in [("pf","💵 Tasa fija"),("pv","📊 Tasa variable"),("cer","📈 CER"),("usd","💲 Dólares")]:
+                        if datos[bq]:
+                            st.markdown(f"**{nm}**")
+                            for inst in datos[bq]:
+                                v = inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst[chr(39)+'label'+chr(39)]} — vto. {v}")
+                    if datos["h"]["liq_str"]:
+                        st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
+                    fl = datos["h"]["liq"]
+                    nombre = f"Licitacion_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Licitacion_nueva.xlsx"
+                    st.markdown("---")
+                    st.download_button("⬇️ Descargar Excel", data=excel_out, file_name=nombre,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
+    else:
+        st.info("⬆️ Subí el PDF para habilitar la generación.")
+
+with tab2:
+    st.markdown("### Subí el PDF de resultados")
+    pdf_res = st.file_uploader("📄 PDF de resultados", type=["pdf"], key="resultados")
+    st.markdown("---")
+    if pdf_res:
+        if st.button("⚙️ Generar Excel de Resultados"):
+            with st.spinner("Procesando resultados..."):
+                try:
+                    datos_res = extraer_resultados_pdf(pdf_res.read())
+                    excel_res = generar_excel_resultados(datos_res)
+                    total_insts = sum(len(b["instrumentos"]) for b in datos_res["bloques"])
+                    st.success(f"✅ {total_insts} instrumentos detectados")
+                    for b in datos_res["bloques"]:
+                        st.markdown(f"**{b['titulo']}**")
+                        for inst in b["instrumentos"]:
+                            st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst['label']}")
+                    if datos_res["fecha_liq_str"]:
+                        st.markdown(f"📅 **Liquidación:** {datos_res['fecha_liq_str']}")
+                    fl = datos_res["fecha_lic"]
+                    nombre_res = f"Resultado_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Resultado_nueva.xlsx"
+                    st.markdown("---")
+                    st.download_button("⬇️ Descargar Excel de Resultados", data=excel_res, file_name=nombre_res,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
+    else:
+        st.info("⬆️ Subí el PDF de resultados para habilitar la generación.")
+
+st.markdown("---")
+st.caption("Banco Hipotecario · Mercado de Capitales · Emisiones Primarias")
+
+
+
+
