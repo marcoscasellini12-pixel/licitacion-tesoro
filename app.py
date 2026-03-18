@@ -380,35 +380,407 @@ def generar_excel(datos):
 st.markdown("## 🏦 Licitación del Tesoro")
 st.markdown("**Banco Hipotecario · Mercado de Capitales**")
 st.markdown("---")
-st.markdown("### Subí el PDF del nuevo llamado")
-pdf_file=st.file_uploader("📄 PDF del llamado",type=["pdf"])
-st.markdown("---")
 
-if pdf_file:
-    if st.button("⚙️ Generar Excel"):
-        with st.spinner("Procesando..."):
-            try:
-                datos=extraer_pdf(pdf_file.read())
-                excel_out=generar_excel(datos)
-                total=sum(len(datos[k]) for k in ["pf","pv","cer","usd"])
-                st.success(f"✅ {total} instrumentos detectados")
-                for bq,nm in [("pf","💵 Tasa fija"),("pv","📊 Tasa variable"),("cer","📈 CER"),("usd","💲 Dólares")]:
-                    if datos[bq]:
-                        st.markdown(f"**{nm}**")
-                        for inst in datos[bq]:
-                            v=inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
-                            st.markdown(f"&nbsp;&nbsp;&nbsp;• `{inst['label']}` — vto. {v}")
-                if datos["h"]["liq_str"]:
-                    st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
-                fl=datos["h"]["liq"]
-                nombre=f"Licitacion_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Licitacion_nueva.xlsx"
-                st.markdown("---")
-                st.download_button("⬇️ Descargar Excel",data=excel_out,file_name=nombre,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}"); st.exception(e)
-else:
-    st.info("⬆️ Subí el PDF para habilitar la generación.")
+tab1, tab2 = st.tabs(["📋 Llamado", "📊 Resultados"])
+
+with tab1:
+    st.markdown("### Subí el PDF del nuevo llamado")
+    pdf_file = st.file_uploader("📄 PDF del llamado", type=["pdf"], key="llamado")
+    st.markdown("---")
+    if pdf_file:
+        if st.button("⚙️ Generar Excel del Llamado"):
+            with st.spinner("Procesando..."):
+                try:
+                    datos = extraer_pdf(pdf_file.read())
+                    excel_out = generar_excel(datos)
+                    total = sum(len(datos[k]) for k in ["pf","pv","cer","usd"])
+                    st.success(f"✅ {total} instrumentos detectados")
+                    for bq, nm in [("pf","💵 Tasa fija"),("pv","📊 Tasa variable"),("cer","📈 CER"),("usd","💲 Dólares")]:
+                        if datos[bq]:
+                            st.markdown(f"**{nm}**")
+                            for inst in datos[bq]:
+                                v = inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst[chr(39)+'label'+chr(39)]} — vto. {v}")
+                    if datos["h"]["liq_str"]:
+                        st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
+                    fl = datos["h"]["liq"]
+                    nombre = f"Licitacion_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Licitacion_nueva.xlsx"
+                    st.markdown("---")
+                    st.download_button("⬇️ Descargar Excel", data=excel_out, file_name=nombre,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
+    else:
+        st.info("⬆️ Subí el PDF para habilitar la generación.")
+
+with tab2:
+    st.markdown("### Subí el PDF de resultados")
+    pdf_res = st.file_uploader("📄 PDF de resultados", type=["pdf"], key="resultados")
+    st.markdown("---")
+    if pdf_res:
+        if st.button("⚙️ Generar Excel de Resultados"):
+            with st.spinner("Procesando resultados..."):
+                try:
+                    datos_res = extraer_resultados_pdf(pdf_res.read())
+                    excel_res = generar_excel_resultados(datos_res)
+                    total_insts = sum(len(b["instrumentos"]) for b in datos_res["bloques"])
+                    st.success(f"✅ {total_insts} instrumentos detectados")
+                    for b in datos_res["bloques"]:
+                        st.markdown(f"**{b['titulo']}**")
+                        for inst in b["instrumentos"]:
+                            st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst['label']}")
+                    if datos_res["fecha_liq_str"]:
+                        st.markdown(f"📅 **Liquidación:** {datos_res['fecha_liq_str']}")
+                    fl = datos_res["fecha_lic"]
+                    nombre_res = f"Resultado_Tesoro_{fl.strftime('%d_%m_%Y')}.xlsx" if fl else "Resultado_nueva.xlsx"
+                    st.markdown("---")
+                    st.download_button("⬇️ Descargar Excel de Resultados", data=excel_res, file_name=nombre_res,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}"); st.exception(e)
+    else:
+        st.info("⬆️ Subí el PDF de resultados para habilitar la generación.")
 
 st.markdown("---")
 st.caption("Banco Hipotecario · Mercado de Capitales · Emisiones Primarias")
+
+
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# MÓDULO RESULTADOS
+# ════════════════════════════════════════════════════════════════════════════
+
+NUM = r"[\d\.]+(?:,\d+)?"  # número: dígitos con punto miles y coma decimal
+
+def _label_resultado(ticker, tipo_ticker, tipo_bloque, nombre_raw):
+    """Genera label corto para la columna de resultado."""
+    es_nuevo = "NUEVO" in tipo_ticker.upper()
+    if tipo_bloque == "pesos_fija":
+        if "BONO" in nombre_raw and "CAPITALIZABLE" in nombre_raw:
+            return f"BONCAP ({ticker} - reapertura)"
+        return f"LECAP ({ticker} - reapertura)"
+    elif tipo_bloque == "cer":
+        return f"BONCER ({ticker} – reapertura)"
+    elif tipo_bloque == "tamar":
+        if "LETRA" in nombre_raw:
+            return f"LETAM ({ticker} - reapertura)"
+        return f"BOTAM ({ticker} - nuevo)" if es_nuevo else f"BOTAM ({ticker} - reapertura)"
+    elif tipo_bloque == "usd":
+        return f"LELINK ({ticker} - reapertura)"
+    return ticker
+
+def _extraer_pesos(seccion, tipo_bloque):
+    """Extrae instrumentos de secciones pesos (tasa fija y CER)."""
+    pat = (
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"(" + NUM + r")%\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"(?:[\w\s]+?\s+)?"
+        r"\((\w+)\s*[-–]\s*(REAPERTURA|NUEVO)\)"
+    )
+    res = []
+    for m in re.finditer(pat, seccion):
+        pos = m.start()
+        antes = seccion[:pos].strip()
+        partes = re.split(r"\)\s*(?:\(\d+\))?\s*", antes)
+        nombre = partes[-1].strip()
+        nombre = re.sub(r"\s*\(\d+\)\s*$", "", nombre).strip()
+        ticker = m.group(7); tipo_t = m.group(8)
+        res.append({
+            "label": _label_resultado(ticker, tipo_t, tipo_bloque, nombre),
+            "vno_ofertado":  f"$ {m.group(1)}",
+            "vno_adjudicado": f"$ {m.group(2)}",
+            "ve_adjudicado":  f"$ {m.group(3)}",
+            "precio_corte":   f"$ {m.group(4)}",
+            "tirea":          f"{m.group(5)}%",
+            "vno_circulacion": f"$ {m.group(6)}",
+        })
+    return res
+
+def _extraer_tamar(seccion):
+    """Extrae instrumentos TAMAR (LETAM con precio $, BOTAM nuevo con margen %)."""
+    res = []
+    # LETAM reapertura: precio $
+    pat_letam = (
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"(" + NUM + r")%\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"(?:[\w\s]+?\s+)?"
+        r"\((\w+)\s*-\s*(REAPERTURA)\)"
+    )
+    for m in re.finditer(pat_letam, seccion):
+        pos = m.start()
+        nombre = seccion[:pos].strip().split(")")[-1].strip()
+        ticker = m.group(7)
+        res.append({
+            "label": _label_resultado(ticker, "REAPERTURA", "tamar", nombre),
+            "vno_ofertado":   f"$ {m.group(1)}",
+            "vno_adjudicado": f"$ {m.group(2)}",
+            "ve_adjudicado":  f"$ {m.group(3)}",
+            "precio_corte":   f"$ {m.group(4)}",
+            "tirea":          f"{m.group(5)}%",
+            "vno_circulacion": f"$ {m.group(6)}",
+        })
+    # BOTAM nuevo: margen % en lugar de precio $
+    pat_botam = (
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"(" + NUM + r")%\s+"   # margen de corte
+        r"(" + NUM + r")%\s+"   # tirea
+        r"\$\s*(" + NUM + r")\s+"
+        r"(?:[\w\s]+?\s+)?"
+        r"\((\w+)\s*[-–]?\s*(NUEVO)\)"
+    )
+    for m in re.finditer(pat_botam, seccion):
+        pos = m.start()
+        nombre = seccion[:pos].strip().split(")")[-1].strip()
+        ticker = m.group(7)
+        res.append({
+            "label": _label_resultado(ticker, "NUEVO", "tamar", nombre),
+            "vno_ofertado":   f"$ {m.group(1)}",
+            "vno_adjudicado": f"$ {m.group(2)}",
+            "ve_adjudicado":  f"$ {m.group(3)}",
+            "precio_corte":   f"{m.group(4)}%",  # margen
+            "tirea":          f"{m.group(5)}%",
+            "vno_circulacion": f"$ {m.group(6)}",
+        })
+    # Ordenar por posición en el texto
+    res.sort(key=lambda x: seccion.find(x["vno_ofertado"].replace("$ ","")))
+    return res
+
+def _extraer_usd(seccion):
+    """Extrae instrumentos USD: VNO en USD, VE en $."""
+    pat = (
+        r"USD\s*(" + NUM + r")\s+"
+        r"USD\s*(" + NUM + r")\s+"
+        r"\$\s*(" + NUM + r")\s+"
+        r"USD\s*(" + NUM + r")\s+"
+        r"(" + NUM + r")%\s+"
+        r"USD\s*(" + NUM + r")\s+"
+        r"(?:[\w\s]+?\s+)?"
+        r"\((\w+)\s*-\s*(REAPERTURA)\)"
+    )
+    res = []
+    for m in re.finditer(pat, seccion):
+        pos = m.start()
+        nombre = seccion[:pos].strip().split(")")[-1].strip()
+        ticker = m.group(7)
+        res.append({
+            "label": _label_resultado(ticker, "REAPERTURA", "usd", nombre),
+            "vno_ofertado":   f"USD {m.group(1)}",
+            "vno_adjudicado": f"USD {m.group(2)}",
+            "ve_adjudicado":  f"$ {m.group(3)}",
+            "precio_corte":   f"USD {m.group(4)}",
+            "tirea":          f"{m.group(5)}%",
+            "vno_circulacion": f"USD {m.group(6)}",
+        })
+    return res
+
+def extraer_resultados_pdf(pdf_bytes):
+    """Extrae todos los datos del PDF de resultados."""
+    txt = ""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for p in pdf.pages: txt += (p.extract_text() or "") + "\n"
+    T = re.sub(r"\s+", " ", txt.upper()).strip()
+
+    # Fecha liquidación
+    m_liq = re.search(r"LIQUIDACI[ÓO]N.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    fecha_liq = pf(m_liq.group(1)) if m_liq else None
+    mf = re.search(r"BUENOS AIRES.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    fecha_lic = pf(mf.group(1)) if mf else None
+
+    # Tipo de cambio
+    m_tc = re.search(r"PESOS\s*/\s*USD\s*([\d\.\,]+)", T)
+    tc_str = m_tc.group(1) if m_tc else ""
+    m_tc_f = re.search(r"D[ÍI]A\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    tc_fecha = m_tc_f.group(1).strip().title() if m_tc_f else ""
+
+    # Totales
+    totales = {}
+    for campo, pat in [
+        ("ofertas",    r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)"),
+        ("vno_of",     r"TOTAL VNO OFERTADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d]+)\s*\$\s*([\d\.]+)"),
+        ("vno_adj",    r"TOTAL VNO ADJUDICADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d]+)\s*\$\s*([\d\.]+)"),
+        ("ve_adj",     r"TOTAL VALOR EFECTIVO ADJUDICADO[^$]*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)"),
+    ]:
+        m = re.search(pat, T)
+        if m: totales[campo] = (m.group(1), m.group(2), m.group(3))
+
+    # Extraer bloques de instrumentos
+    SECCIONES = [
+        ("pesos_fija",
+         "Instrumentos licitados denominados en pesos a tasa fija:",
+         "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA",
+         "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE",
+         lambda s: _extraer_pesos(s, "pesos_fija")),
+        ("cer",
+         "Instrumentos licitados denominados en pesos ajustados por CER:",
+         "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE POR CER",
+         "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
+         lambda s: _extraer_pesos(s, "cer")),
+        ("tamar",
+         "Instrumentos licitados denominados en pesos a tasa TAMAR:",
+         "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
+         "INSTRUMENTO LICITADO DENOMINADO EN D",
+         _extraer_tamar),
+        ("usd",
+         "Instrumento licitado denominado en dólares estadounidenses:",
+         "INSTRUMENTO LICITADO DENOMINADO EN D",
+         "BUENOS AIRES",
+         _extraer_usd),
+    ]
+
+    bloques = []
+    for tipo, titulo, pat_ini, pat_fin, fn in SECCIONES:
+        m_ini = re.search(pat_ini, T)
+        m_fin = re.search(pat_fin, T)
+        if not m_ini: continue
+        start = m_ini.end()
+        end = m_fin.start() if m_fin and m_fin.start() > start else len(T)
+        insts = fn(T[start:end])
+        if insts:
+            bloques.append({"tipo": tipo, "titulo": titulo, "instrumentos": insts})
+
+    return {
+        "bloques": bloques, "totales": totales,
+        "fecha_liq": fecha_liq, "fecha_liq_str": fstr(fecha_liq),
+        "fecha_lic": fecha_lic, "tc_str": tc_str, "tc_fecha": tc_fecha,
+    }
+
+
+def generar_excel_resultados(datos):
+    """Genera el Excel de resultados con el mismo formato visual que el de llamado."""
+    wb = Workbook(); ws = wb.active
+    ws.sheet_view.showGridLines = False
+    fecha_lic = datos["fecha_lic"]
+    if fecha_lic: ws.title = f"Rdo {fecha_lic.strftime('%d.%m.%y')}"
+
+    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["B"].width = 4
+    ws.column_dimensions["C"].width = 4
+    ws.column_dimensions["D"].width = 4
+    ws.column_dimensions["E"].width = 32
+    for i in range(6, 20): ws.column_dimensions[get_column_letter(i)].width = 22
+
+    # Logos
+    ws.row_dimensions[2].height = 50
+    try:
+        buf, _, _ = redimensionar_logo(LOGO_HIP_PATH, 50)
+        img = XLImage(buf); img.anchor = "C2"; ws.add_image(img)
+    except: pass
+    try:
+        buf, _, _ = redimensionar_logo(LOGO_MIN_PATH, 50)
+        img = XLImage(buf); img.anchor = "H2"; ws.add_image(img)
+    except: pass
+
+    # Header
+    ws.row_dimensions[9].height = 18
+    c = ws.cell(row=9, column=7, value="LICITACIÓN DEL TESORO")
+    c.font = Font(bold=True, size=SZ, name="Calibri"); c.alignment = al(h="center", wrap=False)
+
+    ws.row_dimensions[11].height = 18
+    c = ws.cell(row=11, column=5, value="Resultados de la licitación por Efectivo:")
+    c.font = Font(bold=True, size=SZ, name="Calibri"); c.alignment = al(h="left", wrap=False)
+    ws.merge_cells(start_row=11, start_column=5, end_row=11, end_column=14)
+
+    ws.row_dimensions[13].height = 18
+    c = ws.cell(row=13, column=5, value=f"Fecha de Liquidación: {datos['fecha_liq_str']} (T+2)")
+    c.font = Font(size=SZ, name="Calibri"); c.alignment = al(h="left", wrap=False)
+    ws.merge_cells(start_row=13, start_column=5, end_row=13, end_column=14)
+
+    fila = [15]
+    def R(n=1): r = fila[0]; fila[0] += n; return r
+    CL = 5; CD = 6  # col labels = E, datos desde F
+
+    FILAS_DATOS = [
+        ("VN Ofertado (*)",             "vno_ofertado",   GRIS_OSC),
+        ("VN Adjudicado (*)",           "vno_adjudicado", GRIS_CLA),
+        ("Valor Efectivo Adjudicado (*)", "ve_adjudicado",  GRIS_OSC),
+        ("Precio/Tasa de Corte ",       "precio_corte",   GRIS_CLA),
+        ("TIREA",                       "tirea",          GRIS_OSC),
+        ("Factor de Prorrateo",         None,             GRIS_CLA),
+        ("VNO total circulación (*)",   "vno_circulacion", GRIS_OSC),
+    ]
+
+    for bloque in datos["bloques"]:
+        insts = bloque["instrumentos"]
+        if not insts: continue
+        n = len(insts); c1 = CD; c2 = CD + n - 1
+
+        # Título sección
+        r = R(); ws.row_dimensions[r].height = 21
+        ct = ws.cell(row=r, column=CL, value=bloque["titulo"])
+        ct.font = Font(italic=True, bold=True, size=SZ, name="Calibri")
+        ct.alignment = al(h="left", wrap=False)
+        ws.merge_cells(start_row=r, start_column=CL, end_row=r, end_column=c2)
+        R()  # vacía
+
+        # Header naranja
+        r = R(); ws.row_dimensions[r].height = 42
+        ws.cell(row=r, column=CL).fill = F(NARANJA); ws.cell(row=r, column=CL).border = B()
+        for i, inst in enumerate(insts):
+            c = ws.cell(row=r, column=c1+i, value=inst["label"])
+            c.fill = F(NARANJA); c.font = fn(color=BLANCO)
+            c.alignment = al(); c.border = B()
+
+        # Filas de datos
+        for label, campo, gris in FILAS_DATOS:
+            r = R(); ws.row_dimensions[r].height = 21
+            aplicar(ws.cell(row=r, column=CL), gris, valor=label, h="left")
+            for i, inst in enumerate(insts):
+                val = inst.get(campo, "") if campo else ""
+                aplicar(ws.cell(row=r, column=c1+i), gris, valor=val)
+
+        R()  # vacía
+
+    # Tabla resumen totales
+    tot = datos["totales"]
+    if tot:
+        r = R(); ws.row_dimensions[r].height = 21
+        ct = ws.cell(row=r, column=CL, value="Resumen de la Licitación")
+        ct.font = Font(italic=True, bold=True, size=SZ, name="Calibri")
+        ct.alignment = al(h="left", wrap=False)
+        R()
+
+        # Headers resumen
+        r = R(); ws.row_dimensions[r].height = 42
+        hdrs = ["", "Resultados en pesos", "Resultado en dólares", "TOTAL"]
+        for i, txt_h in enumerate(hdrs):
+            c = ws.cell(row=r, column=CL+i, value=txt_h)
+            c.fill = F(NARANJA); c.font = fn(color=BLANCO)
+            c.alignment = al(); c.border = B()
+
+        FILAS_TOT = [
+            ("Cantidad de Ofertas Recibidas", "ofertas", GRIS_OSC),
+            ("Total VNO Ofertado (*)",        "vno_of",  GRIS_CLA),
+            ("Total VNO Adjudicado (*)",      "vno_adj", GRIS_OSC),
+            ("Total Valor Efectivo Adjudicado (*)", "ve_adj", GRIS_CLA),
+        ]
+        for label, campo, gris in FILAS_TOT:
+            r = R(); ws.row_dimensions[r].height = 21
+            aplicar(ws.cell(row=r, column=CL), gris, valor=label, h="left")
+            d = tot.get(campo, ("","",""))
+            aplicar(ws.cell(row=r, column=CL+1), gris, valor=f"$ {d[0]}" if d[0] else "")
+            aplicar(ws.cell(row=r, column=CL+2), gris, valor=f"USD {d[1]}" if d[1] else "")
+            aplicar(ws.cell(row=r, column=CL+3), gris, valor=f"$ {d[2]}" if d[2] else "")
+
+        R()
+        r = R(); ws.row_dimensions[r].height = 21
+        nota = "(*) Montos expresados en millones."
+        if datos["tc_str"]:
+            nota += f"  (**) Tipo de Cambio de Referencia {datos['tc_fecha']}: Pesos / USD {datos['tc_str']}."
+        c = ws.cell(row=r, column=CL, value=nota)
+        c.font = Font(size=9, italic=True, name="Calibri")
+        c.alignment = al(h="left", wrap=True)
+        ws.merge_cells(start_row=r, start_column=CL, end_row=r, end_column=CL+5)
+
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
