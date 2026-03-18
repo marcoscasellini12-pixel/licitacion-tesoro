@@ -61,34 +61,24 @@ def ticker_fecha(T,ticker):
 def F(rgb): return PatternFill("solid",start_color=rgb)
 def fn(bold=False,color=NEGRO): return Font(bold=bold,size=SZ,color=color,name="Calibri")
 def al(h="center",v="center",wrap=True): return Alignment(horizontal=h,vertical=v,wrap_text=wrap)
-
-# Borde: todos los lados BLANCOS y MEDIUM (grueso)
-def B():
+def B(): # todos los bordes blancos medium
     s=Side(style="medium",color=BLANCO)
     return Border(left=s,right=s,top=s,bottom=s)
 
-def aplicar(cell, rgb, valor=None, bold=False, color=NEGRO, h="center", wrap=True, fmt=None):
+def aplicar(cell,rgb,valor=None,bold=False,color=NEGRO,h="center",wrap=True,fmt=None):
     if valor is not None: cell.value=valor
-    cell.fill=F(rgb)
-    cell.font=fn(bold=bold,color=color)
-    cell.alignment=al(h=h,wrap=wrap)
-    cell.border=B()
+    cell.fill=F(rgb); cell.font=fn(bold=bold,color=color)
+    cell.alignment=al(h=h,wrap=wrap); cell.border=B()
     if fmt: cell.number_format=fmt
 
-def aplicar_rango(ws, r, c1, c2, rgb):
-    """Aplica fill y border a todas las celdas del rango."""
-    for c in range(c1,c2+1):
-        aplicar(ws.cell(row=r,column=c), rgb)
+def aplicar_rango(ws,r,c1,c2,rgb):
+    for c in range(c1,c2+1): aplicar(ws.cell(row=r,column=c),rgb)
 
-def merge_escribir(ws, r, c1, c2, rgb, valor, bold=False, h="center"):
-    """Mergea, aplica estilo y escribe valor."""
+def merge_escribir(ws,r,c1,c2,rgb,valor,h="center"):
     aplicar_rango(ws,r,c1,c2,rgb)
     cell=ws.cell(row=r,column=c1,value=valor)
-    cell.font=fn(bold=bold)
-    cell.alignment=al(h=h)
-    cell.border=B()
-    if c2>c1:
-        ws.merge_cells(start_row=r,start_column=c1,end_row=r,end_column=c2)
+    cell.font=fn(); cell.alignment=al(h=h); cell.border=B()
+    if c2>c1: ws.merge_cells(start_row=r,start_column=c1,end_row=r,end_column=c2)
 
 # ── Extracción PDF ────────────────────────────────────────────────────────────
 def extraer_pdf(pdf_bytes):
@@ -118,35 +108,52 @@ def extraer_pdf(pdf_bytes):
     def add(l,k,d):
         if k not in seen: seen.add(k); l.append(d)
 
+    def inst_pesos(label,f,tasa,precio,ajuste,parametro):
+        return {"label":label,"vencimiento":f,"tasa":tasa,"precio":precio,"ajuste":ajuste,
+                "parametro":parametro,"amort":"Íntegra al vencimiento",
+                "monto":"Hasta el monto máximo autorizado por la normativa vigente"}
+
     # LECAP nuevas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL CAPITALIZABLE EN PESOS CON VENCIMIENTO ([\d\w\s]+?)\(NUEVA\)",T):
         f=pf(m.group(1))
-        if f: add(pf_,f"LN{f}",{"label":"LECAP (nueva)","vencimiento":f,"tasa":"A licitar","precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A","parametro":"TEM","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # LECAP reapert
+        if f: add(pf_,f"LN{f}",inst_pesos("LECAP (nueva)",f,"A licitar","$ 1.000,00 por cada VNO $ 1.000","N/A","TEM"))
+    # LECAP reaperturas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL CAPITALIZABLE EN PESOS CON VENCIMIENTO [\d\w\s]+?\((\w+)\s*-\s*REAPERTURA\)",T):
         tk=m.group(1); f=ticker_fecha(T,tk)
-        add(pf_,f"LR{tk}",{"label":f"LECAP ({tk} - reapertura)","vencimiento":f,"tasa":"A licitar","precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A","parametro":"TEM","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # LETAMAR
+        add(pf_,f"LR{tk}",inst_pesos(f"LECAP ({tk} - reapertura)",f,"A licitar","A licitar","N/A","Precio"))
+    # BONCAP reaperturas
+    for m in re.finditer(r"BONO DEL TESORO NACIONAL CAPITALIZABLE EN PESOS CON VENCIMIENTO [\d\w\s]+?\((\w+)\s*-\s*REAPERTURA\)",T):
+        tk=m.group(1); f=ticker_fecha(T,tk)
+        add(pf_,f"BCAP{tk}",inst_pesos(f"BONCAP ({tk} - reapertura)",f,"A licitar","A licitar","N/A","Precio"))
+    # LETAMAR reaperturas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL EN PESOS A TASA TAMAR CON VENCIMIENTO ([\d\w\s]+?)\((\w+)\s*-\s*REAPERTURA\)",T):
         f=pf(m.group(1)); tk=m.group(2)
-        add(pv_,f"LT{tk}",{"label":f"LETAM ({tk} - reapertura)","vencimiento":f,"tasa":"","precio":"A licitar","ajuste":"N/A","parametro":"Precio","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # BOTAMAR
+        add(pv_,f"LT{tk}",inst_pesos(f"LETAM ({tk} - reapertura)",f,"","A licitar","N/A","Precio"))
+    # BOTAMAR reaperturas
     for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS A TASA TAMAR CON VENCIMIENTO ([\d\w\s]+?)\((\w+)\s*[-–]\s*REAPERTURA\)",T):
         f=pf(m.group(1)); tk=m.group(2)
-        add(pv_,f"BT{tk}",{"label":f"BOTAM ({tk} - reapertura)","vencimiento":f,"tasa":"","precio":"A licitar","ajuste":"N/A","parametro":"Precio","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # LECER reapert
+        add(pv_,f"BT{tk}",inst_pesos(f"BOTAM ({tk} - reapertura)",f,"","A licitar","N/A","Precio"))
+    # BOTAMAR nuevos
+    for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS A TASA TAMAR CON VENCIMIENTO ([\d\w\s]+?)\(NUEVO\)",T):
+        f=pf(m.group(1))
+        if f: add(pv_,f"BTN{f}",inst_pesos("BOTAM (nuevo)",f,"A licitar","$ 1.000,00 por cada VNO $ 1.000","N/A","Tasa"))
+    # LECER reaperturas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL EN PESOS AJUSTADA? POR CER A DESCUENTO VENCIMIENTO [\d\w\s]+?\((\w+)\s*-\s*REAPERTURA\)",T):
         tk=m.group(1); f=ticker_fecha(T,tk)
-        add(cer_,f"CR{tk}",{"label":f"LECER ({tk} - reapertura)","vencimiento":f,"tasa":"Cero Cupón","precio":"A licitar","ajuste":"CER","parametro":"Precio","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
+        add(cer_,f"CR{tk}",inst_pesos(f"LECER ({tk} - reapertura)",f,"Cero Cupón","A licitar","CER","Precio"))
     # LECER nuevas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL EN PESOS AJUSTADA? POR CER A DESCUENTO VENCIMIENTO ([\d\w\s]+?)\(NUEVA\)",T):
         f=pf(m.group(1))
-        if f: add(cer_,f"CN{f}",{"label":"LECER (Nueva)","vencimiento":f,"tasa":"Cero Cupón","precio":"A licitar","ajuste":"CER","parametro":"Precio","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # BONCER reapert
+        if f: add(cer_,f"CN{f}",inst_pesos("LECER (Nueva)",f,"Cero Cupón","A licitar","CER","Precio"))
+    # BONCER reaperturas
     for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS CERO CUP[ÓO]N CON AJUSTE POR CER VENCIMIENTO [\d\w\s]+?\((\w+)\s*[-–]\s*REAPERTURA\)",T):
         tk=m.group(1); f=ticker_fecha(T,tk)
-        add(cer_,f"BR{tk}",{"label":f"BONCER ({tk} – reapertura)","vencimiento":f,"tasa":"Cero Cupón","precio":"A licitar","ajuste":"CER","parametro":"Precio","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-    # LELINK reapert
+        add(cer_,f"BR{tk}",inst_pesos(f"BONCER ({tk} – reapertura)",f,"Cero Cupón","A licitar","CER","Precio"))
+    # BONCER nuevos
+    for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS CERO CUP[ÓO]N CON AJUSTE POR CER VENCIMIENTO ([\d\w\s]+?)\(NUEVO\)",T):
+        f=pf(m.group(1))
+        if f: add(cer_,f"BRN{f}",inst_pesos("BONCER (nuevo)",f,"Cero Cupón","A licitar","CER","Precio"))
+    # LELINK reaperturas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL VINCULADA AL D[ÓO]LAR ESTADOUNIDENSE CERO CUP[ÓO]N CON VENCIMIENTO [\d\w\s]+?\((\w+)\s*-\s*REAPERTURA\)",T):
         tk=m.group(1); f=ticker_fecha(T,tk)
         add(usd_,f"LL{tk}",{"tipo":"LELINK","label":f"LELINK ({tk} - reapertura)","vencimiento":f,"tasa":"Cero Cupón","precio":"A licitar","parametro":"Precio","mon_em":"Dólares Estadounidenses","mon_sus":sus_ll,"mon_pago":"Pesos al tipo de cambio aplicable","amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
@@ -178,31 +185,24 @@ def generar_excel(datos):
     ws.column_dimensions["A"].width=4
     ws.column_dimensions["B"].width=4
     ws.column_dimensions["C"].width=30
-    for i in range(4,16): ws.column_dimensions[get_column_letter(i)].width=26
+    for i in range(4,18): ws.column_dimensions[get_column_letter(i)].width=24
 
-    CL=3; CD=4  # col label, col datos inicio
+    CL=3; CD=4
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    def hdr_row(r, negrita, normal, fila_h=18):
-        ws.row_dimensions[r].height=fila_h
-        # celda bold
+    def hdr_row(r,negrita,normal,h_row=18):
+        ws.row_dimensions[r].height=h_row
         c1=ws.cell(row=r,column=CL,value=negrita)
-        c1.font=Font(bold=True,size=SZ,name="Calibri")
-        c1.alignment=al(h="left",wrap=False)
-        # celda normal combinada C+1 hasta col 10
+        c1.font=Font(bold=True,size=SZ,name="Calibri"); c1.alignment=al(h="left",wrap=False)
         c2=ws.cell(row=r,column=CL+1,value=normal)
-        c2.font=Font(bold=False,size=SZ,name="Calibri")
-        c2.alignment=al(h="left",wrap=False)
-        ws.merge_cells(start_row=r,start_column=CL+1,end_row=r,end_column=10)
+        c2.font=Font(bold=False,size=SZ,name="Calibri"); c2.alignment=al(h="left",wrap=False)
+        ws.merge_cells(start_row=r,start_column=CL+1,end_row=r,end_column=12)
 
     ws.row_dimensions[7].height=18
     c=ws.cell(row=7,column=CL,value="LICITACIÓN DEL TESORO")
     c.font=Font(bold=True,size=SZ,name="Calibri"); c.alignment=al(h="left",wrap=False)
-
     ws.row_dimensions[9].height=18
     c=ws.cell(row=9,column=CL,value="LICITACION POR EFECTIVO")
     c.font=Font(bold=True,size=SZ,name="Calibri"); c.alignment=al(h="left",wrap=False)
-
     hdr_row(11,"Período de Licitación Pública:",f" desde las {h['h_ini']} hs hasta las {h['h_fin']} hs del  {h['fecha_lic']}")
     if h["sv"]:
         partes=h["sv"].split(":",1)
@@ -212,35 +212,27 @@ def generar_excel(datos):
     fila=[15]
     def R(n=1): r=fila[0]; fila[0]+=n; return r
 
-    # ── Bloque ────────────────────────────────────────────────────────────────
     def bloque(titulo,insts,es_usd=False):
         if not insts: return
         n=len(insts); c1=CD; c2=CD+n-1
 
-        # Título sección
         r=R(); ws.row_dimensions[r].height=21
         ct=ws.cell(row=r,column=CL,value=titulo)
         ct.font=Font(italic=True,bold=True,size=SZ,name="Calibri")
         ct.alignment=al(h="left",wrap=False)
-        R()  # vacía
+        R()  # fila vacía
 
         # Header naranja
         r=R(); ws.row_dimensions[r].height=42
-        # col C naranja vacía
-        cc=ws.cell(row=r,column=CL)
-        cc.fill=F(NARANJA); cc.border=B()
+        cc=ws.cell(row=r,column=CL); cc.fill=F(NARANJA); cc.border=B()
         for i,inst in enumerate(insts):
             c=ws.cell(row=r,column=c1+i,value=inst["label"])
             c.fill=F(NARANJA); c.font=fn(color=BLANCO)
             c.alignment=al(); c.border=B()
 
-        # ── helpers de fila ───────────────────────────────────────────────────
         def fila_ind(label,getter,gris,h_row=21,fmt=None):
-            """Fila con valor individual por columna."""
             r=R(); ws.row_dimensions[r].height=h_row
-            # label col C
             aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
-            # valores
             for i,inst in enumerate(insts):
                 val=getter(inst)
                 c=ws.cell(row=r,column=c1+i)
@@ -248,62 +240,57 @@ def generar_excel(datos):
                 if fmt: c.number_format=fmt
 
         def fila_merge(label,valor,gris,h_row=21):
-            """Fila con valor combinado en todas las columnas de datos."""
             r=R(); ws.row_dimensions[r].height=h_row
             aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
             merge_escribir(ws,r,c1,c2,gris,valor)
 
         if not es_usd:
-            fila_ind("Vencimiento",   lambda x:x["vencimiento"], GRIS_CLA, fmt="D/M/YYYY")
-            fila_ind("Plazo",         lambda x:dias_entre(x["vencimiento"],fecha_em), GRIS_OSC)
-            fila_merge("Moneda de emision",      "Pesos", GRIS_CLA)
-            fila_merge("Moneda de Suscripcion",  "Pesos", GRIS_CLA)
-            fila_merge("Moneda de Pago",         "Pesos", GRIS_CLA)
-            fila_ind("Tasa de interés ",  lambda x:x.get("tasa",""),    GRIS_OSC)
-            fila_ind("Precio",            lambda x:x.get("precio",""),  GRIS_CLA, h_row=42)
-            fila_ind("Ajuste de capital", lambda x:x.get("ajuste",""),  GRIS_OSC)
+            fila_ind("Vencimiento",    lambda x:x["vencimiento"], GRIS_CLA, fmt="D/M/YYYY")
+            fila_ind("Plazo",          lambda x:dias_entre(x["vencimiento"],fecha_em), GRIS_OSC)
+            fila_merge("Moneda de emision",     "Pesos", GRIS_CLA)
+            fila_merge("Moneda de Suscripcion", "Pesos", GRIS_CLA)
+            fila_merge("Moneda de Pago",        "Pesos", GRIS_CLA)
+            fila_ind("Tasa de interés ",  lambda x:x.get("tasa",""),     GRIS_OSC)
+            fila_ind("Precio",            lambda x:x.get("precio",""),   GRIS_CLA, h_row=42)
+            fila_ind("Ajuste de capital", lambda x:x.get("ajuste",""),   GRIS_OSC)
             fila_ind("Párametro a licitar",lambda x:x.get("parametro",""),GRIS_CLA)
             fila_merge("Amortización",           "Íntegra al vencimiento", GRIS_OSC)
             fila_merge("Monto Máximo a Licitar", "Hasta el monto máximo autorizado por la normativa vigente", GRIS_CLA)
             fila_merge("Ley aplicable",          "Ley de la REPÚBLICA ARGENTINA", GRIS_OSC)
         else:
-            fila_ind("Vencimiento",       lambda x:x["vencimiento"],     GRIS_CLA, fmt="D/M/YYYY")
-            fila_ind("Moneda de emision", lambda x:x.get("mon_em",""),   GRIS_OSC)
-            fila_ind("Moneda de Suscripcion",lambda x:x.get("mon_sus",""),GRIS_CLA,h_row=84)
-            fila_ind("Moneda de Pago",    lambda x:x.get("mon_pago",""), GRIS_OSC, h_row=42)
-            fila_ind("Tasa de interés",   lambda x:x.get("tasa",""),     GRIS_CLA, h_row=42)
-            fila_ind("Precio",            lambda x:x.get("precio",""),   GRIS_OSC)
+            fila_ind("Vencimiento",       lambda x:x["vencimiento"],      GRIS_CLA, fmt="D/M/YYYY")
+            fila_ind("Moneda de emision", lambda x:x.get("mon_em",""),    GRIS_OSC)
+            fila_ind("Moneda de Suscripcion",lambda x:x.get("mon_sus",""),GRIS_CLA, h_row=84)
+            fila_ind("Moneda de Pago",    lambda x:x.get("mon_pago",""),  GRIS_OSC, h_row=42)
+            fila_ind("Tasa de interés",   lambda x:x.get("tasa",""),      GRIS_CLA, h_row=42)
+            fila_ind("Precio",            lambda x:x.get("precio",""),    GRIS_OSC)
             fila_ind("Párametro a licitar",lambda x:x.get("parametro",""),GRIS_CLA)
-            fila_ind("Amortización",      lambda x:x.get("amort",""),    GRIS_OSC)
-            fila_ind("Monto Máximo a Licitar",lambda x:x.get("monto",""),GRIS_CLA,h_row=42)
+            fila_ind("Amortización",      lambda x:x.get("amort",""),     GRIS_OSC)
+            fila_ind("Monto Máximo a Licitar",lambda x:x.get("monto",""), GRIS_CLA, h_row=42)
             fila_merge("Ley aplicable",   "Ley de la REPÚBLICA ARGENTINA", GRIS_OSC)
 
-        R()  # vacía
+        R()  # fila vacía al final
 
     def bonar_especial(usd_list):
         bonar=[x for x in usd_list if x.get("tipo")=="BONAR"]
         if not bonar: return
         b=bonar[0]; n=len(usd_list); c1=CD; c2=CD+n-1
-
         r=R(); ws.row_dimensions[r].height=21
         ct=ws.cell(row=r,column=CL,value="Instrumentros a licitar en dólares")
-        ct.font=Font(italic=True,bold=True,size=SZ,name="Calibri")
-        ct.alignment=al(h="left",wrap=False)
-
+        ct.font=Font(italic=True,bold=True,size=SZ,name="Calibri"); ct.alignment=al(h="left",wrap=False)
         for label,val,h_row,gris in [
-            ("Opción de rescate anticipado",    b.get("opcion",""),    42, GRIS_CLA),
+            ("Opción de rescate anticipado",    b.get("opcion",""),    42,GRIS_CLA),
             ("Fecha de ejercicio de la Opción", b.get("fecha_opcion",""),21,GRIS_OSC),
             ("Forma de pago de los servicios\n de interés",b.get("pago_int",""),63,GRIS_CLA),
         ]:
             r=R(); ws.row_dimensions[r].height=h_row
             aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
             merge_escribir(ws,r,c1,c2,gris,val,h="left")
-
         R()
 
     pesos=datos["pf"]+datos["pv"]
-    if pesos:       bloque("Instrumentos a licitar en pesos a tasa fija y tasa variable:",pesos)
-    if datos["cer"]:bloque("Instrumentos a licitar en pesos ajustados por CER:",datos["cer"])
+    if pesos:        bloque("Instrumentos a licitar en pesos a tasa fija y tasa variable:",pesos)
+    if datos["cer"]: bloque("Instrumentos a licitar en pesos ajustados por CER:",datos["cer"])
     if datos["usd"]:
         bonar_especial(datos["usd"])
         bloque("Instrumentros a licitar en dólares",datos["usd"],es_usd=True)
