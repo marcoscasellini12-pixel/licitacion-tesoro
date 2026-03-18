@@ -520,11 +520,26 @@ def extraer_resultados_pdf(pdf_bytes):
         for p in pdf.pages: txt += (p.extract_text() or "") + "\n"
     T = re.sub(r"\s+", " ", txt.upper()).strip()
 
-    # Fecha liquidación
-    m_liq = re.search(r"LIQUIDACI[ÓO]N.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
-    fecha_liq = pf(m_liq.group(1)) if m_liq else None
+    # Fecha de la licitación (del pie del documento)
     mf = re.search(r"BUENOS AIRES.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
     fecha_lic = pf(mf.group(1)) if mf else None
+
+    # Fecha liquidación: buscar explícita, si no calcular T+2 hábiles desde fecha_lic
+    m_liq = re.search(r"LIQUIDACI[ÓO]N.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    if m_liq:
+        fecha_liq = pf(m_liq.group(1))
+    elif fecha_lic:
+        # Calcular T+2 hábiles (saltar fines de semana)
+        from datetime import timedelta
+        f = fecha_lic
+        dias_habiles = 0
+        while dias_habiles < 2:
+            f = f + timedelta(days=1)
+            if f.weekday() < 5:  # lunes a viernes
+                dias_habiles += 1
+        fecha_liq = f
+    else:
+        fecha_liq = None
 
     # Tipo de cambio
     m_tc = re.search(r"PESOS\s*/\s*USD\s*([\d\.\,]+)", T)
@@ -635,8 +650,7 @@ def generar_excel_resultados(datos):
         ("Valor Efectivo Adjudicado (*)", "ve_adjudicado",  GRIS_OSC),
         ("Precio/Tasa de Corte ",       "precio_corte",   GRIS_CLA),
         ("TIREA",                       "tirea",          GRIS_OSC),
-        ("Factor de Prorrateo",         None,             GRIS_CLA),
-        ("VNO total circulación (*)",   "vno_circulacion", GRIS_OSC),
+        ("VNO total circulación (*)",   "vno_circulacion", GRIS_CLA),
     ]
 
     for bloque in datos["bloques"]:
