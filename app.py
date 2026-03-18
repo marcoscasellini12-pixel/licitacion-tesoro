@@ -1,10 +1,13 @@
 import streamlit as st
-import io, re
+import io, re, base64
 from datetime import datetime
 import pdfplumber
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.drawing.image import Image as XLImage
+from PIL import Image as PILImage
+import os
 
 st.set_page_config(page_title="Licitación del Tesoro", page_icon="🏦", layout="centered")
 st.markdown("""<style>
@@ -39,12 +42,15 @@ def fstr(dt):
     if not dt: return ""
     return f"{dt.day} de {MESES_ES[dt.month]} de {dt.year}"
 
-def dias_entre(venc,emision):
+def dias_entre(venc, emision):
     if not venc or not emision: return ""
-    d=(venc-emision).days
-    if d>365:
-        a=d//365; m=round((d%365)/30)
-        return f"Aprox. {a} año{'s' if a>1 else ''} y {m} meses" if m else f"Aprox. {a} año{'s' if a>1 else ''}"
+    d = (venc - emision).days
+    if d > 365:
+        a = d // 365
+        meses_resto = (d % 365) // 30  # truncar, no redondear
+        if meses_resto > 0:
+            return f"Aprox. {a} año{'s' if a>1 else ''} y {meses_resto} meses"
+        return f"Aprox. {a} año{'s' if a>1 else ''}"
     return f"{d} días"
 
 def ticker_fecha(T,ticker):
@@ -61,7 +67,7 @@ def ticker_fecha(T,ticker):
 def F(rgb): return PatternFill("solid",start_color=rgb)
 def fn(bold=False,color=NEGRO): return Font(bold=bold,size=SZ,color=color,name="Calibri")
 def al(h="center",v="center",wrap=True): return Alignment(horizontal=h,vertical=v,wrap_text=wrap)
-def B(): # todos los bordes blancos medium
+def B():
     s=Side(style="medium",color=BLANCO)
     return Border(left=s,right=s,top=s,bottom=s)
 
@@ -175,6 +181,21 @@ def extraer_pdf(pdf_bytes):
             "h":{"h_ini":h_ini,"h_fin":h_fin,"fecha_lic":fecha_lic_str,"sv":sv,
                  "liq":fecha_liq,"liq_str":fstr(fecha_liq),"em":fecha_em}}
 
+# ── Logos (cargados desde archivos adjuntos en el repo o desde bytes subidos) ──
+LOGO_HIP_PATH = os.path.join(os.path.dirname(__file__), "logo_hipotecario.png")
+LOGO_MIN_PATH = os.path.join(os.path.dirname(__file__), "logo_ministerio.png")
+
+def redimensionar_logo(path, alto_px):
+    """Redimensiona manteniendo aspecto, devuelve BytesIO PNG."""
+    img = PILImage.open(path)
+    w, h = img.size
+    nuevo_w = int(w * alto_px / h)
+    img = img.resize((nuevo_w, alto_px), PILImage.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf, nuevo_w, alto_px
+
 # ── Excel ─────────────────────────────────────────────────────────────────────
 def generar_excel(datos):
     wb=Workbook(); ws=wb.active
@@ -187,32 +208,85 @@ def generar_excel(datos):
     ws.column_dimensions["C"].width=30
     for i in range(4,18): ws.column_dimensions[get_column_letter(i)].width=24
 
+    # Alturas de fila para logos
+    ws.row_dimensions[1].height=15
+    ws.row_dimensions[2].height=50  # fila con logos
+    ws.row_dimensions[3].height=10
+    ws.row_dimensions[4].height=15
+
+    # ── Insertar logos ────────────────────────────────────────────────────────
+    ALTO_LOGO = 50  # puntos ≈ px en pantalla
+
+    try:
+        buf_hip, w_hip, _ = redimensionar_logo(LOGO_HIP_PATH, ALTO_LOGO)
+        img_hip = XLImage(buf_hip)
+        img_hip.anchor = "C2"
+        ws.add_image(img_hip)
+    except Exception:
+        pass
+
+    try:
+        buf_min, w_min, _ = redimensionar_logo(LOGO_MIN_PATH, ALTO_LOGO)
+        img_min = XLImage(buf_min)
+        img_min.anchor = "G2"
+        ws.add_image(img_min)
+    except Exception:
+        pass
+
     CL=3; CD=4
 
-    def hdr_row(r,negrita,normal,h_row=18):
-        ws.row_dimensions[r].height=h_row
-        c1=ws.cell(row=r,column=CL,value=negrita)
-        c1.font=Font(bold=True,size=SZ,name="Calibri"); c1.alignment=al(h="left",wrap=False)
-        c2=ws.cell(row=r,column=CL+1,value=normal)
-        c2.font=Font(bold=False,size=SZ,name="Calibri"); c2.alignment=al(h="left",wrap=False)
-        ws.merge_cells(start_row=r,start_column=CL+1,end_row=r,end_column=12)
+    # ── Header ────────────────────────────────────────────────────────────────
+    # Todo en una sola celda combinada — negrita hasta ":" resto normal
+    # openpyxl no soporta rich text, entonces ponemos la línea completa en negrita
+    # para la parte bold y en celda aparte el texto normal, pero SIN separación visual
+    # La solución más limpia: una sola celda con texto completo, negrita en label
+
+    def hdr_linea(r, negrita, normal, h_row=18):
+        ws.row_dimensions[r].height = h_row
+        # Celda principal con texto COMPLETO combinada hasta col 12
+        cell = ws.cell(row=r, column=CL, value=negrita + normal)
+        # Aplicar negrita a toda la celda (openpyxl no soporta rich text parcial)
+        cell.font = Font(bold=False, size=SZ, name="Calibri")
+        cell.alignment = al(h="left", wrap=False)
+        ws.merge_cells(start_row=r, start_column=CL, end_row=r, end_column=12)
+        # Sobreescribir con dos runs: no es posible en openpyxl directamente
+        # Solución: poner la parte bold en una celda angosta y la normal en la siguiente
+        # Pero esto los separa visualmente. Mejor: texto completo sin bold diferenciado.
+        # Para respetar el formato: bold en toda la celda para las líneas de label
+        cell.font = Font(bold=True, size=SZ, name="Calibri")
 
     ws.row_dimensions[7].height=18
     c=ws.cell(row=7,column=CL,value="LICITACIÓN DEL TESORO")
     c.font=Font(bold=True,size=SZ,name="Calibri"); c.alignment=al(h="left",wrap=False)
+
     ws.row_dimensions[9].height=18
     c=ws.cell(row=9,column=CL,value="LICITACION POR EFECTIVO")
     c.font=Font(bold=True,size=SZ,name="Calibri"); c.alignment=al(h="left",wrap=False)
-    hdr_row(11,"Período de Licitación Pública:",f" desde las {h['h_ini']} hs hasta las {h['h_fin']} hs del  {h['fecha_lic']}")
+
+    # Período — "Período de Licitación Pública:" bold + resto normal en UNA celda combinada
+    def hdr_bicolor(r, parte_bold, parte_normal, h_row=18):
+        ws.row_dimensions[r].height = h_row
+        # Celda bold (col C, angosta)
+        c1 = ws.cell(row=r, column=CL, value=parte_bold)
+        c1.font = Font(bold=True, size=SZ, name="Calibri")
+        c1.alignment = al(h="left", wrap=False)
+        # Celda normal (col D en adelante, combinada)
+        c2 = ws.cell(row=r, column=CL+1, value=parte_normal)
+        c2.font = Font(bold=False, size=SZ, name="Calibri")
+        c2.alignment = al(h="left", wrap=False)
+        ws.merge_cells(start_row=r, start_column=CL+1, end_row=r, end_column=12)
+
+    hdr_bicolor(11, "Período de Licitación Pública:",
+                f" desde las {h['h_ini']} hs hasta las {h['h_fin']} hs del  {h['fecha_lic']}")
     if h["sv"]:
-        partes=h["sv"].split(":",1)
-        hdr_row(12,partes[0]+":",partes[1] if len(partes)>1 else "")
-    hdr_row(13,"Fecha de Liquidación:",f" {h['liq_str']} (T+2)")
+        partes = h["sv"].split(":",1)
+        hdr_bicolor(12, partes[0]+":", partes[1] if len(partes)>1 else "")
+    hdr_bicolor(13, "Fecha de Liquidación:", f" {h['liq_str']} (T+2)")
 
     fila=[15]
     def R(n=1): r=fila[0]; fila[0]+=n; return r
 
-    def bloque(titulo,insts,es_usd=False):
+    def bloque(titulo, insts, es_usd=False):
         if not insts: return
         n=len(insts); c1=CD; c2=CD+n-1
 
@@ -220,9 +294,8 @@ def generar_excel(datos):
         ct=ws.cell(row=r,column=CL,value=titulo)
         ct.font=Font(italic=True,bold=True,size=SZ,name="Calibri")
         ct.alignment=al(h="left",wrap=False)
-        R()  # fila vacía
+        R()
 
-        # Header naranja
         r=R(); ws.row_dimensions[r].height=42
         cc=ws.cell(row=r,column=CL); cc.fill=F(NARANJA); cc.border=B()
         for i,inst in enumerate(insts):
@@ -230,7 +303,7 @@ def generar_excel(datos):
             c.fill=F(NARANJA); c.font=fn(color=BLANCO)
             c.alignment=al(); c.border=B()
 
-        def fila_ind(label,getter,gris,h_row=21,fmt=None):
+        def fila_ind(label, getter, gris, h_row=21, fmt=None):
             r=R(); ws.row_dimensions[r].height=h_row
             aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
             for i,inst in enumerate(insts):
@@ -239,14 +312,14 @@ def generar_excel(datos):
                 aplicar(c,gris,valor=val if val is not None else "")
                 if fmt: c.number_format=fmt
 
-        def fila_merge(label,valor,gris,h_row=21):
+        def fila_merge(label, valor, gris, h_row=21):
             r=R(); ws.row_dimensions[r].height=h_row
             aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
             merge_escribir(ws,r,c1,c2,gris,valor)
 
         if not es_usd:
-            fila_ind("Vencimiento",    lambda x:x["vencimiento"], GRIS_CLA, fmt="D/M/YYYY")
-            fila_ind("Plazo",          lambda x:dias_entre(x["vencimiento"],fecha_em), GRIS_OSC)
+            fila_ind("Vencimiento",     lambda x:x["vencimiento"], GRIS_CLA, fmt="D/M/YYYY")
+            fila_ind("Plazo",           lambda x:dias_entre(x["vencimiento"],fecha_em), GRIS_OSC)
             fila_merge("Moneda de emision",     "Pesos", GRIS_CLA)
             fila_merge("Moneda de Suscripcion", "Pesos", GRIS_CLA)
             fila_merge("Moneda de Pago",        "Pesos", GRIS_CLA)
@@ -260,7 +333,7 @@ def generar_excel(datos):
         else:
             fila_ind("Vencimiento",       lambda x:x["vencimiento"],      GRIS_CLA, fmt="D/M/YYYY")
             fila_ind("Moneda de emision", lambda x:x.get("mon_em",""),    GRIS_OSC)
-            fila_ind("Moneda de Suscripcion",lambda x:x.get("mon_sus",""),GRIS_CLA, h_row=84)
+            fila_ind("Moneda de Suscripcion",lambda x:x.get("mon_sus",""),GRIS_CLA,h_row=84)
             fila_ind("Moneda de Pago",    lambda x:x.get("mon_pago",""),  GRIS_OSC, h_row=42)
             fila_ind("Tasa de interés",   lambda x:x.get("tasa",""),      GRIS_CLA, h_row=42)
             fila_ind("Precio",            lambda x:x.get("precio",""),    GRIS_OSC)
@@ -269,7 +342,7 @@ def generar_excel(datos):
             fila_ind("Monto Máximo a Licitar",lambda x:x.get("monto",""), GRIS_CLA, h_row=42)
             fila_merge("Ley aplicable",   "Ley de la REPÚBLICA ARGENTINA", GRIS_OSC)
 
-        R()  # fila vacía al final
+        R()
 
     def bonar_especial(usd_list):
         bonar=[x for x in usd_list if x.get("tipo")=="BONAR"]
