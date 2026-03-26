@@ -177,7 +177,38 @@ def extraer_pdf(pdf_bytes):
         fr_str=fstr(pf(mr.group(1))) if mr else ""
         add(usd_,f"BN{tk}",{"tipo":"BONAR","label":f"BONAR 2027 ({tk} - reapertura)","vencimiento":f,"tasa":f"TNA {tna} a pagar mensualmente","precio":"A licitar","parametro":"Precio","mon_em":"Dólares Estadounidenses","mon_sus":"En Dólares Estadounidenses","mon_pago":"En Dólares Estadounidenses","amort":"Íntegra al vencimiento","monto":monto_str,"opcion":"Los tenedores de los Bonos podrán ejercer, por única vez, una opción de rescate anticipado, total o parcial, del capital del Bono.","fecha_opcion":fr_str,"pago_int":"Los intereses serán pagaderos en Pesos por semestre vencido los días 30 de mayo y 30 de noviembre de cada año hasta la fecha de vencimiento"})
 
+    # ── Canje (si existe) ────────────────────────────────────────────────────
+    canje = []
+    titulo_elegible = ""
+    liq_canje = None
+    m_canje_ini = re.search(r"CONVERSI[ÓO]N DEL (\w+)", T)
+    if m_canje_ini:
+        m_fin_list = list(re.finditer(r"BUENOS AIRES", T))
+        sec_canje = T[m_canje_ini.start():m_fin_list[-1].start()] if m_fin_list else ""
+        # Título elegible
+        m_te = re.search(r"(\w+)\s+(\d{2}/\d{2}/\d{4})", sec_canje)
+        titulo_elegible = m_canje_ini.group(1) if m_canje_ini else ""
+        # Liq canje T+3
+        m_liq_c = re.search(r"(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})\s*\(T\+3\)", sec_canje)
+        liq_canje = pf(m_liq_c.group(1)) if m_liq_c else None
+        # Opciones
+        pos_op = [(m.start(), int(m.group(1))) for m in re.finditer(r"OPCI[ÓO]N\s+(\d)\)", sec_canje)]
+        for idx, (start, num) in enumerate(pos_op):
+            end = pos_op[idx+1][0] if idx+1 < len(pos_op) else len(sec_canje)
+            bloque = sec_canje[start:end]
+            m_f = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", bloque)
+            f = pddmm(m_f.group(1)) if m_f else None
+            if "TAMAR" in bloque and "TASA TAMAR" in bloque:
+                canje.append({"label":"BOTAM (nuevo)","vencimiento":f,"tasa":"A licitar",
+                    "precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A","parametro":"Tasa",
+                    "amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
+            elif "CER" in bloque and "AJUSTE" in bloque:
+                canje.append({"label":"BONCER (nuevo)","vencimiento":f,"tasa":"Cero Cupón",
+                    "precio":"A licitar","ajuste":"CER","parametro":"Precio",
+                    "amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
+
     return {"pf":pf_,"pv":pv_,"cer":cer_,"usd":usd_,
+            "canje":canje,"titulo_elegible":titulo_elegible,"liq_canje":liq_canje,"liq_canje_str":fstr(liq_canje),
             "h":{"h_ini":h_ini,"h_fin":h_fin,"fecha_lic":fecha_lic_str,"sv":sv,
                  "liq":fecha_liq,"liq_str":fstr(fecha_liq),"em":fecha_em}}
 
@@ -372,6 +403,57 @@ def generar_excel(datos):
             ws.cell(row=r,column=CL,
                 value="(*) En segunda vuelta se emitirá un monto tal que en conjunto con la primera vuelta no supere el VNO USD de 250 Millones"
             ).font=Font(size=SZ,name="Calibri")
+
+    # ── Bloque canje ──────────────────────────────────────────────────────────
+    if datos.get("canje"):
+        R(2)
+        titulo_canje = f"Licitación para la Conversión del {datos.get('titulo_elegible','')}:"
+        liq_str = datos.get("liq_canje_str","")
+        r=R(); ws.row_dimensions[r].height=21
+        ct=ws.cell(row=r,column=CL,value=titulo_canje)
+        ct.font=Font(italic=True,bold=True,size=SZ,name="Calibri"); ct.alignment=al(h="left",wrap=False)
+        if liq_str:
+            r=R(); ws.row_dimensions[r].height=18
+            c=ws.cell(row=r,column=CL,value=f"Liquidación: {liq_str} (T+3)")
+            c.font=Font(size=SZ,name="Calibri"); c.alignment=al(h="left",wrap=False)
+
+        canje_insts = datos["canje"]
+        n=len(canje_insts); c1=CD; c2=CD+n-1
+        R()  # vacía
+
+        # Fila especial: Nombre del Título Elegible (combinada)
+        r=R(); ws.row_dimensions[r].height=42
+        cc=ws.cell(row=r,column=CL); cc.fill=F(NARANJA); cc.border=B()
+        for i,inst in enumerate(canje_insts):
+            c=ws.cell(row=r,column=c1+i,value=inst["label"])
+            c.fill=F(NARANJA); c.font=fn(color=BLANCO)
+            c.alignment=al(); c.border=B()
+
+        # Fila Nombre del Título Elegible
+        r=R(); ws.row_dimensions[r].height=21
+        aplicar(ws.cell(row=r,column=CL),GRIS_OSC,valor="Nombre del Título Elegible",h="left")
+        merge_escribir(ws,r,c1,c2,GRIS_OSC,datos.get("titulo_elegible",""))
+
+        # Filas estándar
+        def fi(label,getter,gris,h_row=21):
+            r=R(); ws.row_dimensions[r].height=h_row
+            aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
+            for i,inst in enumerate(canje_insts):
+                aplicar(ws.cell(row=r,column=c1+i),gris,valor=getter(inst) or "")
+
+        def fm(label,valor,gris,h_row=21):
+            r=R(); ws.row_dimensions[r].height=h_row
+            aplicar(ws.cell(row=r,column=CL),gris,valor=label,h="left")
+            merge_escribir(ws,r,c1,c2,gris,valor)
+
+        fi("Vencimiento",lambda x:x["vencimiento"].strftime("%d/%m/%Y") if x["vencimiento"] else "",GRIS_CLA)
+        fi("Tasa de interés",lambda x:x.get("tasa",""),GRIS_OSC)
+        fi("Precio",lambda x:x.get("precio",""),GRIS_CLA,h_row=42)
+        fi("Ajuste de capital",lambda x:x.get("ajuste",""),GRIS_OSC)
+        fi("Párametro a licitar",lambda x:x.get("parametro",""),GRIS_CLA)
+        fm("Amortización","Íntegra al vencimiento",GRIS_OSC)
+        fm("Monto Máximo a Licitar","Hasta el monto máximo autorizado por la normativa vigente",GRIS_CLA)
+        fm("Ley aplicable","Ley de la REPÚBLICA ARGENTINA",GRIS_OSC)
 
     out=io.BytesIO(); wb.save(out); out.seek(0)
     return out
