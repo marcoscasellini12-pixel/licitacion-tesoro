@@ -834,7 +834,7 @@ with tab1:
                             st.markdown(f"**{nm}**")
                             for inst in datos[bq]:
                                 v = inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
-                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst[chr(39)+'label'+chr(39)]} — vto. {v}")
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst.get("label", "")} — vto. {v}")
                     if datos["h"]["liq_str"]:
                         st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
                     fl = datos["h"]["liq"]
