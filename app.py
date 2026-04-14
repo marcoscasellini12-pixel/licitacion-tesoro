@@ -93,6 +93,49 @@ def extraer_pdf(pdf_bytes):
         for p in pdf.pages: txt+=(p.extract_text() or "")+"\n"
     T=re.sub(r"\s+"," ",txt.upper()).strip()
 
+    # ── Extraer canje AL INICIO para obtener fechas_canje antes de usarlas ───
+    canje = []
+    titulo_elegible = ""
+    liq_canje = None
+    fechas_canje = set()
+    m_canje_ini = re.search(r"CONVERSI[ÓO]N", T)
+    if m_canje_ini:
+        m_fin_list = list(re.finditer(r"BUENOS AIRES", T))
+        sec_canje = T[m_canje_ini.start():m_fin_list[-1].start()] if m_fin_list else ""
+        m_liq_c = re.search(r"(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})\s*\(T\+3\)", sec_canje)
+        liq_canje = pf(m_liq_c.group(1)) if m_liq_c else None
+        pos_op = [(m.start(), int(m.group(1))) for m in re.finditer(r"OPCI[ÓO]N\s+(\d)\)", sec_canje)]
+        titulos_por_opcion = {}
+        # Buscar título elegible por opción (cada opción puede tener uno distinto)
+        for idx, (start, num) in enumerate(pos_op):
+            end = pos_op[idx+1][0] if idx+1 < len(pos_op) else len(sec_canje)
+            bloque = sec_canje[start:end]
+            # Título elegible: buscar especie/código antes del nuevo instrumento
+            m_te = re.search(r"(?:BONCER|BONO DUAL|LELINK)\s+(\w+)\s+(\d{2}/\d{2}/\d{4})", bloque)
+            te = m_te.group(1) if m_te else ""
+            titulos_por_opcion[num] = te
+            # Fecha del nuevo instrumento
+            m_f = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", bloque)
+            f = pddmm(m_f.group(1)) if m_f else None
+            if f: fechas_canje.add(f)
+            # Tipo del nuevo instrumento
+            if "TAMAR" in bloque and ("TASA TAMAR" in bloque or "MARGEN" in bloque):
+                canje.append({"label":"BOTAM (nuevo)","vencimiento":f,"tasa":"TAMAR TEM",
+                    "precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A",
+                    "parametro":"Margen sobre TAMAR","amort":"Íntegra al vencimiento",
+                    "monto":"Hasta el monto máximo autorizado por la normativa vigente",
+                    "titulo_elegible":te})
+            elif "CER" in bloque and "AJUSTE" in bloque:
+                canje.append({"label":"BONCER (reapertura)","vencimiento":f,"tasa":"Cero Cupón",
+                    "precio":"A licitar","ajuste":"CER","parametro":"Precio",
+                    "amort":"Íntegra al vencimiento",
+                    "monto":"Hasta el monto máximo autorizado por la normativa vigente",
+                    "titulo_elegible":te})
+        # Título elegible general (primero que aparece)
+        m_te_gen = re.search(r"(?:BONCER|BONO DUAL)\s+(\w+)", sec_canje)
+        titulo_elegible = m_te_gen.group(1) if m_te_gen else ""
+        canje.sort(key=lambda x: x["vencimiento"] or datetime.max)
+
     m_liq=re.search(r"LIQUIDACI[ÓO]N.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})",T)
     fecha_liq=pf(m_liq.group(1)) if m_liq else None
     if not fecha_liq:
@@ -180,36 +223,6 @@ def extraer_pdf(pdf_bytes):
         mr=re.search(r"RESCATE ANTICIPADO.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})",T)
         fr_str=fstr(pf(mr.group(1))) if mr else ""
         add(usd_,f"BN{tk}",{"tipo":"BONAR","label":f"BONAR 2027 ({tk} - reapertura)","vencimiento":f,"tasa":f"TNA {tna} a pagar mensualmente","precio":"A licitar","parametro":"Precio","mon_em":"Dólares Estadounidenses","mon_sus":"En Dólares Estadounidenses","mon_pago":"En Dólares Estadounidenses","amort":"Íntegra al vencimiento","monto":monto_str,"opcion":"Los tenedores de los Bonos podrán ejercer, por única vez, una opción de rescate anticipado, total o parcial, del capital del Bono.","fecha_opcion":fr_str,"pago_int":"Los intereses serán pagaderos en Pesos por semestre vencido los días 30 de mayo y 30 de noviembre de cada año hasta la fecha de vencimiento"})
-
-    # ── Canje (si existe) — extraer PRIMERO para saber qué fechas excluir ──────
-    canje = []
-    titulo_elegible = ""
-    liq_canje = None
-    fechas_canje = set()  # fechas que pertenecen al canje, no al efectivo
-    m_canje_ini = re.search(r"CONVERSI[ÓO]N DEL (\w+)", T)
-    if m_canje_ini:
-        m_fin_list = list(re.finditer(r"BUENOS AIRES", T))
-        sec_canje = T[m_canje_ini.start():m_fin_list[-1].start()] if m_fin_list else ""
-        titulo_elegible = m_canje_ini.group(1).strip() if m_canje_ini else ""
-        m_liq_c = re.search(r"(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})\s*\(T\+3\)", sec_canje)
-        liq_canje = pf(m_liq_c.group(1)) if m_liq_c else None
-        pos_op = [(m.start(), int(m.group(1))) for m in re.finditer(r"OPCI[ÓO]N\s+(\d)\)", sec_canje)]
-        for idx, (start, num) in enumerate(pos_op):
-            end = pos_op[idx+1][0] if idx+1 < len(pos_op) else len(sec_canje)
-            bloque = sec_canje[start:end]
-            m_f = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", bloque)
-            f = pddmm(m_f.group(1)) if m_f else None
-            if f: fechas_canje.add(f)
-            if "TAMAR" in bloque and "TASA TAMAR" in bloque:
-                canje.append({"label":"BOTAM (nuevo)","vencimiento":f,"tasa":"TAMAR TEM",
-                    "precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A","parametro":"Margen sobre TAMAR",
-                    "amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-            elif "CER" in bloque and "AJUSTE" in bloque:
-                canje.append({"label":"BONCER (nuevo)","vencimiento":f,"tasa":"Cero Cupón",
-                    "precio":"A licitar","ajuste":"CER","parametro":"Precio",
-                    "amort":"Íntegra al vencimiento","monto":"Hasta el monto máximo autorizado por la normativa vigente"})
-        # Ordenar canje por fecha de vencimiento
-        canje.sort(key=lambda x: x["vencimiento"] or datetime.max)
 
     # Ordenar USD por vencimiento
     usd_.sort(key=lambda x: x["vencimiento"] or datetime.max)
@@ -435,10 +448,15 @@ def generar_excel(datos):
             c.fill=F(NARANJA); c.font=fn(color=BLANCO)
             c.alignment=al(); c.border=B()
 
-        # Fila Nombre del Título Elegible
+        # Fila Nombre del Título Elegible — por columna si hay TE distintos
         r=R(); ws.row_dimensions[r].height=21
         aplicar(ws.cell(row=r,column=CL),GRIS_OSC,valor="Nombre del Título Elegible",h="left")
-        merge_escribir(ws,r,c1,c2,GRIS_OSC,datos.get("titulo_elegible",""))
+        tes = [inst.get("titulo_elegible","") for inst in canje_insts]
+        if len(set(tes)) == 1:
+            merge_escribir(ws,r,c1,c2,GRIS_OSC,tes[0] if tes else "")
+        else:
+            for i,te in enumerate(tes):
+                aplicar(ws.cell(row=r,column=c1+i),GRIS_OSC,valor=te)
 
         # Filas estándar
         def fi(label,getter,gris,h_row=21):
