@@ -700,23 +700,28 @@ def _extraer_canje_res(sec):
             seen.add(lbl)
             res.append(_inst_r(lbl, f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
                 f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
-    # Formato antiguo sin OPCION N (fallback)
+    # Formato antiguo sin OPCION N (fallback): NUEVO - OPCION 1 - ticker
     if not res:
         patB_old = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\(NUEVO\s*-\s*OPCI[ÓO]N\s*1\s*[-–]\s*(\w+)\)")
-    for m in re.finditer(patB, sec):
-        res.append(_inst_r(f"BOTAM ({m.group(7)} - nuevo)",
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
-    # BONCER opciones 2 y 3 (precio $)
-    patC = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\(NUEVO\s*-\s*OPCI[ÓO]N\s*\d\s*[-–]\s*(\w+)\)")
-    for m in re.finditer(patC, sec):
-        res.append(_inst_r(f"BONCER ({m.group(7)} - nuevo)",
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
+                    r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+                    r"[^(]*\(NUEVO\s*-\s*OPCI[ÓO]N\s*1\s*[-–]\s*(\w+)\)")
+        for m in re.finditer(patB_old, sec):
+            lbl = f"BOTAM ({m.group(7)} - nuevo)"
+            if lbl not in seen:
+                seen.add(lbl)
+                res.append(_inst_r(lbl,
+                    f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                    f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
+        patC_old = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+                    r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+                    r"[^(]*\(NUEVO\s*-\s*OPCI[ÓO]N\s*\d\s*[-–]\s*(\w+)\)")
+        for m in re.finditer(patC_old, sec):
+            lbl = f"BONCER ({m.group(7)} - nuevo)"
+            if lbl not in seen:
+                seen.add(lbl)
+                res.append(_inst_r(lbl,
+                    f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                    f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
     return res
 
 
