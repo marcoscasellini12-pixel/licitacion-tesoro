@@ -600,22 +600,70 @@ def _extraer_pesos_res(sec, tipo_b):
             f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
             f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
 
+    # Pat E: formato resultado — ticker DESPUÉS de los números (TICKER - REAPERTURA) o (TICKER - NUEVA)
+    patE = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+            r"[^(]*\((\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVA?)\)")
+    for m in re.finditer(patE, sec):
+        tk = m.group(7); tipo_t = m.group(8)
+        if tk in seen: continue
+        seen.add(tk)
+        nombre = sec[:m.start()].strip().split(")")[-1].strip()
+        res.append(_inst_r(_lbl_res(tk, tipo_t, tipo_b, nombre),
+            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
+
+    # Pat F: formato resultado margen% — ticker DESPUÉS (TICKER - NUEVA) con margen sin $
+    patF = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+            r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+            r"[^(]*\((\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVA?)\)")
+    for m in re.finditer(patF, sec):
+        tk = m.group(7); tipo_t = m.group(8)
+        if tk in seen: continue
+        seen.add(tk)
+        nombre = sec[:m.start()].strip().split(")")[-1].strip()
+        res.append(_inst_r(_lbl_res(tk, tipo_t, tipo_b, nombre),
+            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+            f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
+
+    return res
+    """LECAP/BONCAP: TEM% — soporta ticker antes O después de los números"""
+    res = []
+    seen = set()
+    for pat in [
+        # Formato llamado: (NUEVO - TICKER) o (NUEVO – TICKER)
+        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+         r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)"),
+        # Formato resultado: (TICKER - NUEVA) — ticker después de los números
+        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+         r"[^(]*\((\w+)\s*-\s*NUEVA?\)"),
+    ]:
+        for m in re.finditer(pat, sec):
+            tk = m.group(7)
+            if tk in seen: continue
+            seen.add(tk)
+            nombre = sec[:m.start()].strip().split(")")[-1].strip()
+            res.append(_inst_r(_lbl_res(tk, "NUEVO", "pesos_fija", nombre),
+                f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                f"{m.group(4)}% TEM", f"{m.group(5)}%", f"$ {m.group(6)}"))
     return res
 
 
 def _extraer_tem_res(sec):
-    """LECAP nueva con TEM% (sin $ en precio)"""
+    """LECAP/BONCAP: TEM% — soporta ticker antes O después de los números"""
     res = []
     seen = set()
     for pat in [
-        # (NUEVO - TICKER)
-        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-         r"[^(]*\(NUEVO\s*-\s*(\w+)\)"),
-        # (NUEVO – TICKER) guión largo
+        # Formato llamado: (NUEVO - TICKER) o (NUEVO – TICKER)
         (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
          r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
          r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)"),
+        # Formato resultado: (TICKER - NUEVA) — ticker después de los números
+        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+         r"[^(]*\((\w+)\s*-\s*NUEVA?\)"),
     ]:
         for m in re.finditer(pat, sec):
             tk = m.group(7)
@@ -629,17 +677,27 @@ def _extraer_tem_res(sec):
 
 
 def _extraer_usd_linked_res(sec):
-    """Dólar Linked: VNO en USD, VE en $"""
-    pat = (r"USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-           r"USD\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+USD\s*("+NUM_R+r")\s+"
-           r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)")
+    """Dólar Linked: VNO en USD, VE en $ — soporta ticker antes O después"""
     res = []
-    for m in re.finditer(pat, sec):
-        tk = m.group(7)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip() + " LINKED"
-        res.append(_inst_r(_lbl_res(tk, "NUEVO", "usd", nombre),
-            f"USD {m.group(1)}", f"USD {m.group(2)}", f"$ {m.group(3)}",
-            f"USD {m.group(4)}", f"{m.group(5)}%", f"USD {m.group(6)}"))
+    seen = set()
+    for pat, tipo_t in [
+        # Formato llamado: (NUEVO – TICKER)
+        (r"USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+         r"USD\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+USD\s*("+NUM_R+r")\s+"
+         r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)", "NUEVO"),
+        # Formato resultado: (TICKER - REAPERTURA)
+        (r"USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+         r"USD\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+USD\s*("+NUM_R+r")\s+"
+         r"[^(]*\((\w+)\s*-\s*REAPERTURA\)", "REAPERTURA"),
+    ]:
+        for m in re.finditer(pat, sec):
+            tk = m.group(7)
+            if tk in seen: continue
+            seen.add(tk)
+            nombre = sec[:m.start()].strip().split(")")[-1].strip() + " LINKED"
+            res.append(_inst_r(_lbl_res(tk, tipo_t, "usd", nombre),
+                f"USD {m.group(1)}", f"USD {m.group(2)}", f"$ {m.group(3)}",
+                f"USD {m.group(4)}", f"{m.group(5)}%", f"USD {m.group(6)}"))
     return res
 
 
@@ -667,40 +725,42 @@ def _extraer_bonar_res(sec):
 
 
 def _extraer_canje_res(sec):
-    """Canje: 4 opciones - LELINK USD, BOTAM pesos, BONCER pesos"""
+    """Canje: 4 opciones — extrae por opción para evitar duplicados"""
     res = []
     seen = set()
-    # Opción 1 USD LINKED: VNO en USD
+
+    # Opción 1 USD LINKED: USD USD USD USD% USD (OPCION 1 - TICKER – REAPERTURA)
     patU = (r"USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+"
             r"USD\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+USD\s*("+NUM_R+r")\s+"
-            r"[^(]*\(OPCION\s*1\s*[-\u2013]\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
+            r"[^(]*\(OPCION\s*1\s*[-–]\s*(\w+)\s*[-–]\s*REAPERTURA\)")
     for m in re.finditer(patU, sec):
         lbl = f"BONO DÓLAR LINKED ({m.group(7)} - reapertura)"
         if lbl not in seen:
             seen.add(lbl)
             res.append(_inst_r(lbl, f"USD {m.group(1)}", f"USD {m.group(2)}", f"USD {m.group(3)}",
                 f"USD {m.group(4)}", f"{m.group(5)}%", f"USD {m.group(6)}"))
-    # Opciones BOTAM pesos (margen%)
-    patB_m = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-              r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-              r"[^(]*\(OPCION\s*\d\s*[-\u2013]?\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
-    for m in re.finditer(patB_m, sec):
-        lbl = f"BOTAM ({m.group(7)} - reapertura)"
-        if lbl not in seen:
-            seen.add(lbl)
-            res.append(_inst_r(lbl, f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-                f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
-    # Opciones BONCER pesos (precio$)
-    patC = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+
+    # Opciones 2, 3, 4 en pesos: $ $ $ $ % $ (OPCION N [–] TICKER [–] REAPERTURA)
+    # Detecta el número de opción y el ticker para armar labels únicos
+    patP = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
             r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\(OPCION\s*\d\s*[-\u2013]?\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
-    for m in re.finditer(patC, sec):
-        lbl = f"BONCER ({m.group(7)} - reapertura)"
-        if lbl not in seen:
-            seen.add(lbl)
+            r"[^(]*\(OPCION\s*(\d)\s*[-–]?\s*(\w+)\s*[-–]\s*REAPERTURA\)")
+    for m in re.finditer(patP, sec):
+        op = m.group(7); tk = m.group(8)
+        # Nombre del instrumento nuevo: buscar en el texto antes del match
+        bloque_antes = sec[max(0, m.start()-300):m.start()]
+        if "TAMAR" in bloque_antes and "CER" not in bloque_antes.split("TAMAR")[-1][:50]:
+            lbl = f"BOTAM ({tk} - reapertura)"
+        else:
+            lbl = f"BONCER ({tk} - reapertura)"
+        # Hacer único por opcion+ticker para no deduplicar op2 y op3 que tienen mismo ticker TMF28
+        key = f"op{op}_{tk}"
+        if key not in seen:
+            seen.add(key)
             res.append(_inst_r(lbl, f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
                 f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
-    # Formato antiguo sin OPCION N (fallback): NUEVO - OPCION 1 - ticker
+
+    # Fallback formato antiguo (NUEVO - OPCION N - TICKER)
     if not res:
         patB_old = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
                     r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
@@ -897,16 +957,15 @@ def extraer_resultados_pdf(pdf_bytes):
         dias = 0
         while dias < 2:
             f = f + timedelta(days=1)
-            if f.weekday() < 5:
-                dias += 1
+            if f.weekday() < 5: dias += 1
     fecha_liq = f
 
     m_tc = re.search(r"PESOS\s*/\s*USD\s*([\d\.\,]+)", T)
     tc_str = m_tc.group(1) if m_tc else ""
-    m_tc_f = re.search(r"D[ÍI]A\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    m_tc_f = re.search(r"D[\xcd\xcd]A\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
+    if not m_tc_f:
+        m_tc_f = re.search(r"D[IÍ]A\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", T)
     tc_fecha = m_tc_f.group(1).strip().title() if m_tc_f else ""
-
-    usa_letras = bool(re.search(r"A\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA", T))
 
     def get_sec(pat_ini, pat_fin):
         m1 = re.search(pat_ini, T)
@@ -916,94 +975,70 @@ def extraer_resultados_pdf(pdf_bytes):
 
     bloques = []
 
-    if usa_letras:
-        # Formato nuevo con letras A/B/C/D
-        sec_a = get_sec(r"A\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA",
-                        r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE")
-        insts_a = _extraer_tem_res(sec_a) or _extraer_pesos_res(sec_a, "pesos_fija")
-        if insts_a:
-            bloques.append({"tipo":"pesos_fija",
-                "titulo":"Instrumentos licitados denominados en pesos a tasa fija:",
-                "instrumentos":insts_a})
+    # A) Tasa fija (LECAP, BONCAP)
+    sec_tf = get_sec(r"A\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA",
+                     r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE")
+    insts_tf = _extraer_tem_res(sec_tf) or _extraer_pesos_res(sec_tf, "pesos_fija")
+    if insts_tf:
+        bloques.append({"tipo":"pesos_fija",
+            "titulo":"Instrumentos licitados denominados en pesos a tasa fija:",
+            "instrumentos":insts_tf})
 
-        sec_b = get_sec(r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE POR CER",
-                        r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR")
-        insts_b = _extraer_pesos_res(sec_b, "cer")
-        if insts_b:
-            bloques.append({"tipo":"cer",
-                "titulo":"Instrumentos licitados denominados en pesos ajustados por CER:",
-                "instrumentos":insts_b})
+    # B) CER (BONCER, LECER)
+    sec_cer = get_sec(r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE POR CER",
+                      r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR")
+    insts_cer = _extraer_pesos_res(sec_cer, "cer")
+    if insts_cer:
+        bloques.append({"tipo":"cer",
+            "titulo":"Instrumentos licitados denominados en pesos ajustados por CER:",
+            "instrumentos":insts_cer})
 
-        sec_c = get_sec(r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
-                        r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER|D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR")
-        insts_c = _extraer_pesos_res(sec_c, "tamar")
-        if insts_c:
-            bloques.append({"tipo":"tamar",
-                "titulo":"Instrumentos licitados denominados en pesos a tasa TAMAR:",
-                "instrumentos":insts_c})
+    # C) TAMAR (BOTAM, LETAM)
+    sec_tamar = get_sec(r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
+                        r"D\)\s*INSTRUMENTO")
+    insts_tamar = _extraer_pesos_res(sec_tamar, "tamar")
+    if insts_tamar:
+        bloques.append({"tipo":"tamar",
+            "titulo":"Instrumentos licitados denominados en pesos a tasa TAMAR:",
+            "instrumentos":insts_tamar})
 
-        # Sección DUAL CER/TAMAR (puede ser D o E)
-        sec_dual = get_sec(r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER",
-                           r"E\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR")
-        insts_dual = _extraer_pesos_res(sec_dual, "dual") if sec_dual else []
-        if insts_dual:
-            bloques.append({"tipo":"dual",
-                "titulo":"Instrumento licitado denominado en pesos CER / TAMAR + 3%: ",
-                "instrumentos":insts_dual})
+    # D) DUAL CER/TAMAR
+    sec_dual = get_sec(r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER",
+                       r"E\)\s*INSTRUMENTOS LICITADOS")
+    insts_dual = _extraer_pesos_res(sec_dual, "dual")
+    if insts_dual:
+        bloques.append({"tipo":"dual",
+            "titulo":"Instrumento licitado denominado en pesos CER / TAMAR + 3%: ",
+            "instrumentos":insts_dual})
 
-        # Dólar Linked: puede ser D o E según si existe dual
-        sec_d = get_sec(r"E\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED",
-                        r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE")
-        if not sec_d:
-            sec_d = get_sec(r"D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED",
-                            r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE")
-        insts_d = _extraer_usd_linked_res(sec_d)
+    # E) Dolar Linked (con fallback si no hay D de dual)
+    sec_lelink = get_sec(r"E\)\s*INSTRUMENTOS LICITADOS D[OÓ]LAR LINKED",
+                         r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N")
+    if not sec_lelink:
+        sec_lelink = get_sec(r"D\)\s*INSTRUMENTOS LICITADOS D[OÓ]LAR",
+                             r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N")
+    insts_lelink = _extraer_usd_linked_res(sec_lelink)
 
-        sec_bonar = get_sec(r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE",
-                            r"B\)\s*LICITACI[ÓO]N POR LA CONVERSI[ÓO]N")
-        insts_bonar = _extraer_bonar_res(sec_bonar)
+    # 2) BONAR USD
+    sec_bonar = get_sec(r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N EXCLUSIVAMENTE",
+                        r"B\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N")
+    insts_bonar = _extraer_bonar_res(sec_bonar)
 
-        all_usd = insts_d + insts_bonar
-        if all_usd:
-            bloques.append({"tipo":"usd",
-                "titulo":"Instrumento licitado denominado en dólares estadounidenses:",
-                "instrumentos":all_usd})
+    all_usd = insts_lelink + insts_bonar
+    if all_usd:
+        bloques.append({"tipo":"usd",
+            "titulo":"Instrumento licitado denominado en dólares estadounidenses:",
+            "instrumentos":all_usd})
 
-        sec_canje = get_sec(r"B\)\s*LICITACI[ÓO]N POR LA CONVERSI[ÓO]N", r"BUENOS AIRES")
-        insts_canje = _extraer_canje_res(sec_canje)
-        if insts_canje:
-            bloques.append({"tipo":"canje",
-                "titulo":"Conversión:",
-                "instrumentos":insts_canje,
-                "titulo_elegible":""})
-    else:
-        # Formato viejo con nombres completos
-        for tipo, titulo, pat_i, pat_f, fn_ext in [
-            ("pesos_fija",
-             "Instrumentos licitados denominados en pesos a tasa fija:",
-             "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA",
-             "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE",
-             lambda s: _extraer_pesos_res(s, "pesos_fija")),
-            ("cer",
-             "Instrumentos licitados denominados en pesos ajustados por CER:",
-             "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE POR CER",
-             "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
-             lambda s: _extraer_pesos_res(s, "cer")),
-            ("tamar",
-             "Instrumentos licitados denominados en pesos a tasa TAMAR:",
-             "INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
-             "INSTRUMENTO LICITADO DENOMINADO EN D",
-             lambda s: _extraer_pesos_res(s, "tamar")),
-            ("usd",
-             "Instrumento licitado denominado en dólares estadounidenses:",
-             "INSTRUMENTO LICITADO DENOMINADO EN D",
-             "BUENOS AIRES",
-             lambda s: _extraer_usd_linked_res(s) + _extraer_bonar_res(s)),
-        ]:
-            insts = fn_ext(get_sec(pat_i, pat_f))
-            if insts:
-                bloques.append({"tipo":tipo, "titulo":titulo, "instrumentos":insts})
-
+    # B) Canje
+    sec_canje = get_sec(r"B\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N",
+                        r"SE RECUERDA A LOS PARTICIPANTES|BUENOS AIRES")
+    insts_canje = _extraer_canje_res(sec_canje)
+    if insts_canje:
+        bloques.append({"tipo":"canje",
+            "titulo":"Conversión:",
+            "instrumentos":insts_canje,
+            "titulo_elegible":""})
     totales = {}
     # Ofertas: "3.437  194  3.631" (pesos, linked/usd, total)
     m = re.search(r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)", T)
