@@ -119,21 +119,35 @@ def extraer_pdf(pdf_bytes):
             f = pddmm(m_f.group(1)) if m_f else None
             if f: fechas_canje.add(f)
             # Tipo del nuevo instrumento
-            if "TAMAR" in bloque and ("TASA TAMAR" in bloque or "MARGEN" in bloque):
-                canje.append({"label":"BOTAM (nuevo)","vencimiento":f,"tasa":"TAMAR TEM",
-                    "precio":"$ 1.000,00 por cada VNO $ 1.000","ajuste":"N/A",
-                    "parametro":"Margen sobre TAMAR","amort":"Íntegra al vencimiento",
+            m_tk_new = re.search(r"\((\w+)\s*[-\u2013]\s*REAPERTURA\)", bloque)
+            tk_new = m_tk_new.group(1) if m_tk_new else ""
+            if "VINCULADO AL D" in bloque or ("LINKED" in bloque and "DOLAR" in bloque):
+                lbl_new = f"BONO DÓLAR LINKED ({tk_new} - reapertura)" if tk_new else "BONO DÓLAR LINKED (reapertura)"
+                canje.append({"label":lbl_new,"vencimiento":f,"tasa":"Cero Cupón",
+                    "precio":"A licitar","ajuste":"N/A","parametro":"Precio",
+                    "amort":"Íntegra al vencimiento",
+                    "monto":"Hasta el monto máximo autorizado por la normativa vigente",
+                    "titulo_elegible":te})
+            elif "TAMAR" in bloque and ("TASA TAMAR" in bloque or "MARGEN" in bloque):
+                lbl_new = f"BOTAM ({tk_new} - reapertura)" if tk_new else "BOTAM (reapertura)"
+                canje.append({"label":lbl_new,"vencimiento":f,"tasa":"TAMAR TEM",
+                    "precio":"A licitar","ajuste":"N/A",
+                    "parametro":"Precio","amort":"Íntegra al vencimiento",
                     "monto":"Hasta el monto máximo autorizado por la normativa vigente",
                     "titulo_elegible":te})
             elif "CER" in bloque and "AJUSTE" in bloque:
-                canje.append({"label":"BONCER (reapertura)","vencimiento":f,"tasa":"Cero Cupón",
+                lbl_new = f"BONCER ({tk_new} - reapertura)" if tk_new else "BONCER (reapertura)"
+                canje.append({"label":lbl_new,"vencimiento":f,"tasa":"Cero Cupón",
                     "precio":"A licitar","ajuste":"CER","parametro":"Precio",
                     "amort":"Íntegra al vencimiento",
                     "monto":"Hasta el monto máximo autorizado por la normativa vigente",
                     "titulo_elegible":te})
         # Título elegible general (primero que aparece)
-        m_te_gen = re.search(r"(?:BONCER|BONO DUAL)\s+(\w+)", sec_canje)
-        titulo_elegible = m_te_gen.group(1) if m_te_gen else ""
+        te_names = []
+        for inst_c in canje:
+            te = inst_c.get("titulo_elegible","")
+            if te and te not in te_names: te_names.append(te)
+        titulo_elegible = ", ".join(te_names) if te_names else ""
         canje.sort(key=lambda x: x["vencimiento"] or datetime.max)
 
     m_liq=re.search(r"LIQUIDACI[ÓO]N.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})",T)
@@ -185,7 +199,15 @@ def extraer_pdf(pdf_bytes):
     # BOTAMAR nuevos (solo los del efectivo, no los del canje)
     for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS A TASA TAMAR CON VENCIMIENTO ([\d\w\s]+?)\(NUEVO\)",T):
         f=pf(m.group(1))
-        if f and f not in fechas_canje: add(pv_,f"BTN{f}",inst_pesos("BOTAM (nuevo)",f,"A licitar","$ 1.000,00 por cada VNO $ 1.000","N/A","Tasa"))
+        if f and f not in fechas_canje: add(pv_,f"BTN{f}",inst_pesos("BOTAM (nuevo)",f,"A licitar","$ 1.000,00 por cada VNO $ 1.000","N/A","Margen sobre TAMAR"))
+    # BONO DUAL CER/TAMAR nuevos
+    for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS DUAL CER / TAMAR CON VENCIMIENTO ([\d\w\s]+?)\(NUEVO\)",T):
+        f=pf(m.group(1))
+        if f: add(pv_,f"DUAL{f}",inst_pesos("DUAL CER / TAMAR (Nuevo)",f,"Máximo: CER / TAMAR","A licitar","N/A","Precio"))
+    # BONO DUAL CER/TAMAR reaperturas
+    for m in re.finditer(r"BONO DEL TESORO NACIONAL EN PESOS DUAL CER / TAMAR CON VENCIMIENTO [\d\w\s]+?\((\w+)\s*[-\u2013]\s*REAPERTURA\)",T):
+        tk=m.group(1); f=ticker_fecha(T,tk)
+        add(pv_,f"DUALR{tk}",inst_pesos(f"DUAL CER / TAMAR ({tk} - reapertura)",f,"Máximo: CER / TAMAR","A licitar","N/A","Precio"))
     # LECER reaperturas
     for m in re.finditer(r"LETRA DEL TESORO NACIONAL EN PESOS AJUSTADA? POR CER A DESCUENTO VENCIMIENTO [\d\w\s]+?\((\w+)\s*-\s*REAPERTURA\)",T):
         tk=m.group(1); f=ticker_fecha(T,tk)
@@ -222,7 +244,7 @@ def extraer_pdf(pdf_bytes):
         m_tna=re.search(r"ESTADOUNIDENSES\s+(\d+%)",T); tna=m_tna.group(1) if m_tna else "6%"
         mr=re.search(r"RESCATE ANTICIPADO.*?(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})",T)
         fr_str=fstr(pf(mr.group(1))) if mr else ""
-        add(usd_,f"BN{tk}",{"tipo":"BONAR","label":f"BONAR 2027 ({tk} - reapertura)","vencimiento":f,"tasa":f"TNA {tna} a pagar mensualmente","precio":"A licitar","parametro":"Precio","mon_em":"Dólares Estadounidenses","mon_sus":"En Dólares Estadounidenses","mon_pago":"En Dólares Estadounidenses","amort":"Íntegra al vencimiento","monto":monto_str,"opcion":"Los tenedores de los Bonos podrán ejercer, por única vez, una opción de rescate anticipado, total o parcial, del capital del Bono.","fecha_opcion":fr_str,"pago_int":"Los intereses serán pagaderos en Pesos por semestre vencido los días 30 de mayo y 30 de noviembre de cada año hasta la fecha de vencimiento"})
+        add(usd_,f"BN{tk}",{"tipo":"BONAR","label":f"BONAR ({tk} - reapertura)","vencimiento":f,"tasa":f"TNA {tna} a pagar mensualmente","precio":"A licitar","parametro":"Precio","mon_em":"Dólares Estadounidenses","mon_sus":"En Dólares Estadounidenses","mon_pago":"En Dólares Estadounidenses","amort":"Íntegra al vencimiento","monto":monto_str,"opcion":"Los tenedores de los Bonos podrán ejercer, por única vez, una opción de rescate anticipado, total o parcial, del capital del Bono.","fecha_opcion":fr_str,"pago_int":"Los intereses serán pagaderos en Pesos por semestre vencido los días 30 de mayo y 30 de noviembre de cada año hasta la fecha de vencimiento"})
 
     # Ordenar USD por vencimiento
     usd_.sort(key=lambda x: x["vencimiento"] or datetime.max)
@@ -332,6 +354,10 @@ def generar_excel(datos):
         partes = h["sv"].split(":",1)
         hdr_bicolor(12, partes[0]+":", partes[1] if len(partes)>1 else "")
     hdr_bicolor(13, "Fecha de Liquidación:", f" {h['liq_str']} (T+2)")
+    liq_canje_str = datos.get("liq_canje_str","")
+    if liq_canje_str:
+        ws.row_dimensions[14].height=18
+        hdr_bicolor(14, "Fecha de Liquidación canje:", f" {liq_canje_str} (T+3)")
 
     fila=[15]
     def R(n=1): r=fila[0]; fila[0]+=n; return r
@@ -411,9 +437,12 @@ def generar_excel(datos):
             merge_escribir(ws,r,c1,c2,gris,val,h="left")
         R()
 
-    pesos=datos["pf"]+datos["pv"]
+    pv_no_dual = [x for x in datos["pv"] if "DUAL" not in x.get("label","").upper()]
+    pesos=datos["pf"]+pv_no_dual
     if pesos:        bloque("Instrumentos a licitar en pesos a tasa fija y tasa variable:",pesos)
     if datos["cer"]: bloque("Instrumentos a licitar en pesos ajustados por CER:",datos["cer"])
+    pv_dual = [x for x in datos["pv"] if "DUAL" in x.get("label","").upper()]
+    if pv_dual: bloque("Instrumento a licitar en pesos dual tasa variable / CER:",pv_dual)
     if datos["usd"]:
         bonar_especial(datos["usd"])
         bloque("Instrumentros a licitar en dólares",datos["usd"],es_usd=True)
@@ -500,9 +529,11 @@ def _lbl_res(ticker, tipo_t, tipo_b, nombre):
         if "LETRA" in nombre:
             return f"LETAM ({ticker} - reapertura)"
         return f"BOTAM ({ticker} - nuevo)" if es_nuevo else f"BOTAM ({ticker} - reapertura)"
+    if tipo_b == "dual":
+        return f"BONCER ({ticker} - nuevo)" if es_nuevo else f"BONCER ({ticker} - reapertura)"
     if tipo_b == "usd":
         if "LINKED" in nombre or "VINCULADO" in nombre:
-            return f"BONO DÓLAR LINKED ({ticker} - nuevo)"
+            return f"BONO DÓLAR LINKED ({ticker} - nuevo)" if es_nuevo else f"BONO DÓLAR LINKED ({ticker} - reapertura)"
         return f"BONAR ({ticker} - nuevo)" if es_nuevo else f"BONAR ({ticker} - reapertura)"
     return ticker
 
@@ -636,10 +667,42 @@ def _extraer_bonar_res(sec):
 
 
 def _extraer_canje_res(sec):
-    """Canje: BOTAM con margen%, BONCER con precio$"""
+    """Canje: 4 opciones - LELINK USD, BOTAM pesos, BONCER pesos"""
     res = []
-    # BOTAM opción 1 (margen sin $)
-    patB = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+    seen = set()
+    # Opción 1 USD LINKED: VNO en USD
+    patU = (r"USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+USD\s*("+NUM_R+r")\s+"
+            r"USD\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+USD\s*("+NUM_R+r")\s+"
+            r"[^(]*\(OPCION\s*1\s*[-\u2013]\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
+    for m in re.finditer(patU, sec):
+        lbl = f"BONO DÓLAR LINKED ({m.group(7)} - reapertura)"
+        if lbl not in seen:
+            seen.add(lbl)
+            res.append(_inst_r(lbl, f"USD {m.group(1)}", f"USD {m.group(2)}", f"USD {m.group(3)}",
+                f"USD {m.group(4)}", f"{m.group(5)}%", f"USD {m.group(6)}"))
+    # Opciones BOTAM pesos (margen%)
+    patB_m = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+              r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+              r"[^(]*\(OPCION\s*\d\s*[-\u2013]?\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
+    for m in re.finditer(patB_m, sec):
+        lbl = f"BOTAM ({m.group(7)} - reapertura)"
+        if lbl not in seen:
+            seen.add(lbl)
+            res.append(_inst_r(lbl, f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
+    # Opciones BONCER pesos (precio$)
+    patC = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+            r"[^(]*\(OPCION\s*\d\s*[-\u2013]?\s*(\w+)\s*[-\u2013]\s*REAPERTURA\)")
+    for m in re.finditer(patC, sec):
+        lbl = f"BONCER ({m.group(7)} - reapertura)"
+        if lbl not in seen:
+            seen.add(lbl)
+            res.append(_inst_r(lbl, f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
+    # Formato antiguo sin OPCION N (fallback)
+    if not res:
+        patB_old = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
             r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
             r"[^(]*\(NUEVO\s*-\s*OPCI[ÓO]N\s*1\s*[-–]\s*(\w+)\)")
     for m in re.finditer(patB, sec):
@@ -702,6 +765,12 @@ def generar_excel_resultados(datos):
     c.font = Font(size=SZ, name="Calibri")
     c.alignment = al(h="left", wrap=False)
     ws.merge_cells(start_row=13, start_column=5, end_row=13, end_column=14)
+    if datos.get("liq_canje_str"):
+        ws.row_dimensions[14].height = 18
+        c14 = ws.cell(row=14, column=5, value=f"Fecha de Liquidación canje: {datos['liq_canje_str']} (T+3)")
+        c14.font = Font(size=SZ, name="Calibri")
+        c14.alignment = al(h="left", wrap=False)
+        ws.merge_cells(start_row=14, start_column=5, end_row=14, end_column=14)
 
     fila = [15]
     def R(n=1): r = fila[0]; fila[0] += n; return r
@@ -714,6 +783,14 @@ def generar_excel_resultados(datos):
         ("Precio/Tasa de Corte ",         "precio_corte",   GRIS_CLA),
         ("TIREA",                         "tirea",          GRIS_OSC),
         ("VNO total circulación (*)",     "vno_circulacion", GRIS_CLA),
+    ]
+    FILAS_CANJE = [
+        ("VN Ofertado (*)",               "vno_ofertado",   GRIS_OSC),
+        ("VN Adjudicado (*)",             "vno_adjudicado", GRIS_CLA),
+        ("Valor Efectivo Adjudicado (*)", "ve_adjudicado",  GRIS_OSC),
+        ("Precio/Margen de Corte ",       "precio_corte",   GRIS_CLA),
+        ("TIREA",                         "tirea",          GRIS_OSC),
+        ("VNO a rescatar de TE",          "vno_circulacion", GRIS_CLA),
     ]
 
     for bloque in datos["bloques"]:
@@ -744,7 +821,8 @@ def generar_excel_resultados(datos):
             aplicar(ws.cell(row=r, column=CL), GRIS_OSC, valor="Nombre del Título Elegible", h="left")
             merge_escribir(ws, r, c1, c2, GRIS_OSC, bloque.get("titulo_elegible", ""))
 
-        for label, campo, gris in FILAS_DATOS:
+        filas_uso = FILAS_CANJE if bloque.get("tipo") == "canje" else FILAS_DATOS
+        for label, campo, gris in filas_uso:
             r = R(); ws.row_dimensions[r].height = 21
             aplicar(ws.cell(row=r, column=CL), gris, valor=label, h="left")
             for i, inst in enumerate(insts):
@@ -762,7 +840,7 @@ def generar_excel_resultados(datos):
         R()
 
         r = R(); ws.row_dimensions[r].height = 42
-        for i, txt_h in enumerate(["", "Resultados en pesos", "Resultado en dólares", "TOTAL"]):
+        for i, txt_h in enumerate(["", "Resultados en pesos", "Resultado por instrumentos Dólar Linked ", "Resultado por instrumentos en dólares estadounidenses. "]):
             c = ws.cell(row=r, column=CL+i, value=txt_h)
             c.fill = F(NARANJA); c.font = fn(color=BLANCO)
             c.alignment = al(); c.border = B()
@@ -852,15 +930,28 @@ def extraer_resultados_pdf(pdf_bytes):
                 "instrumentos":insts_b})
 
         sec_c = get_sec(r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
-                        r"D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED")
+                        r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER|D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR")
         insts_c = _extraer_pesos_res(sec_c, "tamar")
         if insts_c:
             bloques.append({"tipo":"tamar",
                 "titulo":"Instrumentos licitados denominados en pesos a tasa TAMAR:",
                 "instrumentos":insts_c})
 
-        sec_d = get_sec(r"D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED",
+        # Sección DUAL CER/TAMAR (puede ser D o E)
+        sec_dual = get_sec(r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER",
+                           r"E\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR")
+        insts_dual = _extraer_pesos_res(sec_dual, "dual") if sec_dual else []
+        if insts_dual:
+            bloques.append({"tipo":"dual",
+                "titulo":"Instrumento licitado denominado en pesos CER / TAMAR + 3%: ",
+                "instrumentos":insts_dual})
+
+        # Dólar Linked: puede ser D o E según si existe dual
+        sec_d = get_sec(r"E\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED",
                         r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE")
+        if not sec_d:
+            sec_d = get_sec(r"D\)\s*INSTRUMENTOS LICITADOS D[ÓO]LAR LINKED",
+                            r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE")
         insts_d = _extraer_usd_linked_res(sec_d)
 
         sec_bonar = get_sec(r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[ÓO]N EXCLUSIVAMENTE",
@@ -876,12 +967,10 @@ def extraer_resultados_pdf(pdf_bytes):
         sec_canje = get_sec(r"B\)\s*LICITACI[ÓO]N POR LA CONVERSI[ÓO]N", r"BUENOS AIRES")
         insts_canje = _extraer_canje_res(sec_canje)
         if insts_canje:
-            m_tit = re.search(r"CONVERSI[ÓO]N DEL (\w+)", sec_canje)
-            tit = m_tit.group(1) if m_tit else "TZX26"
             bloques.append({"tipo":"canje",
-                "titulo":f"Conversión del {tit}:",
+                "titulo":"Conversión:",
                 "instrumentos":insts_canje,
-                "titulo_elegible":tit})
+                "titulo_elegible":""})
     else:
         # Formato viejo con nombres completos
         for tipo, titulo, pat_i, pat_f, fn_ext in [
@@ -911,23 +1000,37 @@ def extraer_resultados_pdf(pdf_bytes):
                 bloques.append({"tipo":tipo, "titulo":titulo, "instrumentos":insts})
 
     totales = {}
-    for campo, pat in [
-        ("ofertas", r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+[\w\s\.]+?\s+([\d\.]+)"),
-        ("vno_of",  r"TOTAL VNO OFERTADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d]+)\s*\$\s*([\d\.]+)"),
-        ("vno_adj", r"TOTAL VNO ADJUDICADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d]+)\s*\$\s*([\d\.]+)"),
-        ("ve_adj",  r"TOTAL VALOR EFECTIVO ADJUDICADO[^$]*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)"),
-    ]:
-        m = re.search(pat, T)
-        if m:
-            if campo == "ofertas":
-                totales[campo] = (m.group(1), "", m.group(2))
-            else:
-                totales[campo] = (m.group(1), m.group(2), m.group(3))
+    # Ofertas: "3.437  194  3.631" (pesos, linked/usd, total)
+    m = re.search(r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)", T)
+    if m: totales["ofertas"] = (m.group(1), m.group(2), m.group(3))
+    else:
+        m = re.search(r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+[\w\s\.]+?\s+([\d\.]+)", T)
+        if m: totales["ofertas"] = (m.group(1), "", m.group(2))
+    # VNO Ofertado: puede tener $..USD..USD..$ o $..USD..$
+    m = re.search(r"TOTAL VNO OFERTADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d\.]+)\s*\$\s*([\d\.]+)", T)
+    if m: totales["vno_of"] = (m.group(1), m.group(2), m.group(3))
+    # VNO Adjudicado
+    m = re.search(r"TOTAL VNO ADJUDICADO[^$]*\$\s*([\d\.]+)\s+USD\s*([\d\.]+)\s*\$\s*([\d\.]+)", T)
+    if m: totales["vno_adj"] = (m.group(1), m.group(2), m.group(3))
+    # VE Adjudicado
+    m = re.search(r"TOTAL VALOR EFECTIVO ADJUDICADO[^$]*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)\s*\$\s*([\d\.]+)", T)
+    if m: totales["ve_adj"] = (m.group(1), m.group(2), m.group(3))
 
+    # Fecha de liquidación canje (T+3 hábiles desde fecha licitación)
+    from datetime import timedelta as _td2
+    f_liq_canje = fecha_lic
+    if f_liq_canje:
+        dias_h = 0
+        while dias_h < 3:
+            f_liq_canje = f_liq_canje + _td2(days=1)
+            if f_liq_canje.weekday() < 5: dias_h += 1
+    else:
+        f_liq_canje = None
     return {
         "bloques": bloques, "totales": totales,
         "fecha_liq": fecha_liq, "fecha_liq_str": fstr(fecha_liq),
         "fecha_lic": fecha_lic, "tc_str": tc_str, "tc_fecha": tc_fecha,
+        "liq_canje": f_liq_canje, "liq_canje_str": fstr(f_liq_canje),
     }
 
 
@@ -951,11 +1054,11 @@ with tab1:
                     total = sum(len(datos[k]) for k in ["pf","pv","cer","usd"])
                     st.success(f"✅ {total} instrumentos detectados")
                     for bq, nm in [("pf","💵 Tasa fija"),("pv","📊 Tasa variable"),("cer","📈 CER"),("usd","💲 Dólares")]:
-                        if datos[bq]:
+                        if datos.get(bq):
                             st.markdown(f"**{nm}**")
                             for inst in datos[bq]:
                                 v = inst["vencimiento"].strftime("%d/%m/%Y") if inst["vencimiento"] else "N/A"
-                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst.get("label", "")} — vto. {v}")
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;• {inst.get('label', '')} — vto. {v}")
                     if datos["h"]["liq_str"]:
                         st.markdown(f"📅 **Liquidación:** {datos['h']['liq_str']}")
                     fl = datos["h"]["liq"]
