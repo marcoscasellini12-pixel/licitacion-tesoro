@@ -517,25 +517,28 @@ def generar_excel(datos):
 
 NUM_R = r"[\d\.]+(?:,\d+)?"
 
-def _lbl_res(ticker, tipo_t, tipo_b, nombre):
-    es_nuevo = "NUEVO" in tipo_t.upper()
+def _lbl_res(ticker, tipo_t, tipo_b, nombre, sin_ticker=False):
+    es_nuevo = "NUEVO" in tipo_t.upper() or "NUEVA" in tipo_t.upper()
+    suf = "nueva" if es_nuevo else "reapertura"
+    suf_m = "nuevo" if es_nuevo else "reapertura"
+    ident = f"vto. {ticker}" if sin_ticker else ticker
     if tipo_b == "pesos_fija":
         if "BONO" in nombre and "CAPITALIZABLE" in nombre:
-            return f"BONCAP ({ticker} - reapertura)"
-        return f"LECAP ({ticker} - nueva)" if es_nuevo else f"LECAP ({ticker} - reapertura)"
+            return f"BONCAP ({ident} - reapertura)"
+        return f"LECAP ({ident} - {suf})"
     if tipo_b == "cer":
-        return f"BONCER ({ticker} – nuevo)" if es_nuevo else f"BONCER ({ticker} – reapertura)"
+        return f"BONCER ({ident} – {suf_m})"
     if tipo_b == "tamar":
         if "LETRA" in nombre:
-            return f"LETAM ({ticker} - reapertura)"
-        return f"BOTAM ({ticker} - nuevo)" if es_nuevo else f"BOTAM ({ticker} - reapertura)"
+            return f"LETAM ({ident} - reapertura)"
+        return f"BOTAM ({ident} - {suf_m})"
     if tipo_b == "dual":
-        return f"BONCER ({ticker} - nuevo)" if es_nuevo else f"BONCER ({ticker} - reapertura)"
+        return f"BONCER ({ident} - {suf_m})"
     if tipo_b == "usd":
         if "LINKED" in nombre or "VINCULADO" in nombre:
-            return f"BONO DÓLAR LINKED ({ticker} - nuevo)" if es_nuevo else f"BONO DÓLAR LINKED ({ticker} - reapertura)"
-        return f"BONAR ({ticker} - nuevo)" if es_nuevo else f"BONAR ({ticker} - reapertura)"
-    return ticker
+            return f"BONO DÓLAR LINKED ({ident} - {suf_m})"
+        return f"BONAR ({ident} - {suf_m})"
+    return ident
 
 def _inst_r(label, vno_of, vno_adj, ve_adj, precio, tirea, circ):
     return {
@@ -545,136 +548,87 @@ def _inst_r(label, vno_of, vno_adj, ve_adj, precio, tirea, circ):
     }
 
 def _extraer_pesos_res(sec, tipo_b):
+    """Extrae instrumentos en pesos (CER/TAMAR/DUAL). Maneja 3 formatos de paréntesis:
+       (TICKER - REAPERTURA), (TICKER - NUEVO), y (NUEVO) solo sin ticker (se usa fecha)."""
     res = []
     seen = set()
 
-    # Pat A: (TICKER - REAPERTURA) — precio $
-    patA = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\((\w+)\s*[-–]\s*(REAPERTURA|REAP)\)")
-    for m in re.finditer(patA, sec):
-        tk = m.group(7)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, "REAPERTURA", tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
+    # Patrón con precio $ (CER, DUAL): $ $ $ $ %% $ + paréntesis final
+    pat_precio = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+                  r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+                  r"([^()]{0,250}?)\(([^)]+)\)")
+    # Patrón con margen% (TAMAR): $ $ $ %% %% $ + paréntesis final
+    pat_margen = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+                  r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+                  r"([^()]{0,250}?)\(([^)]+)\)")
 
-    # Pat B: (NUEVO - TICKER) — precio $, formato viejo
-    patB = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\((\w+)\s*[-–]\s*NUEVO\)")
-    for m in re.finditer(patB, sec):
-        tk = m.group(7)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, "NUEVO", tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
-
-    # Pat C: (NUEVO – TICKER) — precio $, formato nuevo (guión largo, tipo primero)
-    patC = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)")
-    for m in re.finditer(patC, sec):
-        tk = m.group(7)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, "NUEVO", tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
-
-    # Pat D: margen% (sin $) — BOTAM nuevo, formato viejo
-    patD = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\((\w+)\s*[-–]\s*NUEVO\)")
-    for m in re.finditer(patD, sec):
-        tk = m.group(7)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, "NUEVO", tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
-
-    # Pat E: formato resultado — ticker DESPUÉS de los números (TICKER - REAPERTURA) o (TICKER - NUEVA)
-    patE = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"\$\s*("+NUM_R+r")\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\((\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVA?)\)")
-    for m in re.finditer(patE, sec):
-        tk = m.group(7); tipo_t = m.group(8)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, tipo_t, tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
-
-    # Pat F: formato resultado margen% — ticker DESPUÉS (TICKER - NUEVA) con margen sin $
-    patF = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-            r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-            r"[^(]*\((\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVA?)\)")
-    for m in re.finditer(patF, sec):
-        tk = m.group(7); tipo_t = m.group(8)
-        if tk in seen: continue
-        seen.add(tk)
-        nombre = sec[:m.start()].strip().split(")")[-1].strip()
-        res.append(_inst_r(_lbl_res(tk, tipo_t, tipo_b, nombre),
-            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-            f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
-
-    return res
-    """LECAP/BONCAP: TEM% — soporta ticker antes O después de los números"""
-    res = []
-    seen = set()
-    for pat in [
-        # Formato llamado: (NUEVO - TICKER) o (NUEVO – TICKER)
-        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-         r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)"),
-        # Formato resultado: (TICKER - NUEVA) — ticker después de los números
-        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-         r"[^(]*\((\w+)\s*-\s*NUEVA?\)"),
-    ]:
+    for pat, es_margen in [(pat_precio, False), (pat_margen, True)]:
         for m in re.finditer(pat, sec):
-            tk = m.group(7)
-            if tk in seen: continue
-            seen.add(tk)
-            nombre = sec[:m.start()].strip().split(")")[-1].strip()
-            res.append(_inst_r(_lbl_res(tk, "NUEVO", "pesos_fija", nombre),
-                f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-                f"{m.group(4)}% TEM", f"{m.group(5)}%", f"$ {m.group(6)}"))
+            contexto_nombre = m.group(7).strip()
+            paren = m.group(8).strip()  # contenido entre paréntesis, ej: "TZXM8 – REAPERTURA" o "NUEVO"
+
+            # Extraer ticker y tipo del paréntesis
+            mm = re.match(r"(\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVO|NUEVA)", paren)
+            sin_ticker = False
+            if mm:
+                ticker = mm.group(1); tipo_t = mm.group(2)
+            elif re.match(r"^(NUEVO|NUEVA)$", paren):
+                # Sin ticker explícito: usar fecha de vencimiento como identificador único
+                m_fecha = re.search(r"VENCIMIENTO\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", contexto_nombre)
+                fch = pf(m_fecha.group(1)) if m_fecha else None
+                ticker = fch.strftime("%d/%m/%Y") if fch else f"s/d{len(seen)}"
+                tipo_t = paren
+                sin_ticker = True
+            else:
+                continue  # paréntesis no reconocido (nota al pie, etc.)
+
+            key = ticker
+            if key in seen: continue
+            seen.add(key)
+
+            nombre = contexto_nombre.split(")")[-1].strip()
+            label = _lbl_res(ticker, tipo_t, tipo_b, nombre, sin_ticker)
+            if es_margen:
+                res.append(_inst_r(label,
+                    f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                    f"{m.group(4)}%", f"{m.group(5)}%", f"$ {m.group(6)}"))
+            else:
+                res.append(_inst_r(label,
+                    f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+                    f"$ {m.group(4)}", f"{m.group(5)}%", f"$ {m.group(6)}"))
     return res
 
 
 def _extraer_tem_res(sec):
-    """LECAP/BONCAP: TEM% — soporta ticker antes O después de los números"""
+    """LECAP/BONCAP: TEM% — tolera '(**)' extra pegado al %, y ticker ausente (NUEVO/NUEVA solo)."""
     res = []
     seen = set()
-    for pat in [
-        # Formato llamado: (NUEVO - TICKER) o (NUEVO – TICKER)
-        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-         r"[^(]*\(NUEVO\s*[-–]\s*(\w+)\)"),
-        # Formato resultado: (TICKER - NUEVA) — ticker después de los números
-        (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
-         r"("+NUM_R+r")%\s+("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
-         r"[^(]*\((\w+)\s*-\s*NUEVA?\)"),
-    ]:
-        for m in re.finditer(pat, sec):
-            tk = m.group(7)
-            if tk in seen: continue
-            seen.add(tk)
-            nombre = sec[:m.start()].strip().split(")")[-1].strip()
-            res.append(_inst_r(_lbl_res(tk, "NUEVO", "pesos_fija", nombre),
-                f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
-                f"{m.group(4)}% TEM", f"{m.group(5)}%", f"$ {m.group(6)}"))
+    # $ $ $ TEM%(opcional **) TIREA% $ + paréntesis final
+    pat = (r"\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+\$\s*("+NUM_R+r")\s+"
+           r"("+NUM_R+r")%\s*(?:\([^)]*\)\s*)?\s*("+NUM_R+r")%\s+\$\s*("+NUM_R+r")\s+"
+           r"([^()]{0,250}?)\(([^)]+)\)")
+    for m in re.finditer(pat, sec):
+        contexto_nombre = m.group(7).strip()
+        paren = m.group(8).strip()
+        mm = re.match(r"(\w+)\s*[-–]\s*(REAPERTURA|REAP|NUEVO|NUEVA)", paren)
+        sin_ticker = False
+        if mm:
+            ticker = mm.group(1); tipo_t = mm.group(2)
+        elif re.match(r"^(NUEVO|NUEVA)$", paren):
+            m_fecha = re.search(r"VENCIMIENTO\s+(\d{1,2}\s+DE\s+\w+\s+DE\s+\d{4})", contexto_nombre)
+            fch = pf(m_fecha.group(1)) if m_fecha else None
+            ticker = fch.strftime("%d/%m/%Y") if fch else f"s/d{len(seen)}"
+            tipo_t = paren
+            sin_ticker = True
+        else:
+            continue
+        if ticker in seen: continue
+        seen.add(ticker)
+        nombre = contexto_nombre.split(")")[-1].strip()
+        res.append(_inst_r(_lbl_res(ticker, tipo_t, "pesos_fija", nombre, sin_ticker),
+            f"$ {m.group(1)}", f"$ {m.group(2)}", f"$ {m.group(3)}",
+            f"{m.group(4)}% TEM", f"{m.group(5)}%", f"$ {m.group(6)}"))
     return res
-
 
 def _extraer_usd_linked_res(sec):
     """Dólar Linked: VNO en USD, VE en $ — soporta ticker antes O después"""
@@ -911,18 +865,19 @@ def generar_excel_resultados(datos):
             c.alignment = al(); c.border = B()
 
         FILAS_TOT = [
-            ("Cantidad de Ofertas Recibidas", "ofertas", GRIS_OSC, False),
-            ("Total VNO Ofertado (*)",        "vno_of",  GRIS_CLA, True),
-            ("Total VNO Adjudicado (*)",      "vno_adj", GRIS_OSC, True),
-            ("Total Valor Efectivo Adjudicado (*)", "ve_adj", GRIS_CLA, True),
+            ("Cantidad de Ofertas Recibidas", "ofertas", GRIS_OSC, False, False),
+            ("Total VNO Ofertado (*)",        "vno_of",  GRIS_CLA, True, True),
+            ("Total VNO Adjudicado (*)",      "vno_adj", GRIS_OSC, True, True),
+            ("Total Valor Efectivo Adjudicado (*)", "ve_adj", GRIS_CLA, True, False),
         ]
-        for label, campo, gris, es_moneda in FILAS_TOT:
+        for label, campo, gris, es_moneda, col2_usd in FILAS_TOT:
             r = R(); ws.row_dimensions[r].height = 21
             aplicar(ws.cell(row=r, column=CL), gris, valor=label, h="left")
             d = tot.get(campo, ("", "", ""))
             if es_moneda:
+                pref2 = "USD " if col2_usd else "$ "
                 aplicar(ws.cell(row=r, column=CL+1), gris, valor=f"$ {d[0]}" if d[0] else "")
-                aplicar(ws.cell(row=r, column=CL+2), gris, valor=f"USD {d[1]}" if d[1] else "")
+                aplicar(ws.cell(row=r, column=CL+2), gris, valor=f"{pref2}{d[1]}" if d[1] else "")
                 aplicar(ws.cell(row=r, column=CL+3), gris, valor=f"$ {d[2]}" if d[2] else "")
             else:
                 aplicar(ws.cell(row=r, column=CL+1), gris, valor=d[0] if d[0] else "")
@@ -975,18 +930,31 @@ def extraer_resultados_pdf(pdf_bytes):
 
     bloques = []
 
-    # A) Tasa fija (LECAP, BONCAP)
-    sec_tf = get_sec(r"A\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA FIJA",
-                     r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE")
+    # Anclamos SOLO en "X) " seguido de cualquier texto hasta ":" — tolera
+    # cambios de redacción del Tesoro (singular/plural, "instrumento" vs "instrumentos a licitar", etc.)
+    def get_letra(letra_ini, letra_fin_opciones):
+        """Busca desde 'LETRA_INI)' hasta la primera letra de fin que aparezca después."""
+        m1 = re.search(rf"\b{letra_ini}\)\s*[A-ZÁÉÍÓÚÑ][^:]{{0,140}}:", T)
+        if not m1: return ""
+        start = m1.end()
+        end = len(T)
+        for lf in letra_fin_opciones:
+            m2 = re.search(rf"\b{lf}\)\s*[A-ZÁÉÍÓÚÑ]", T[start:])
+            if m2:
+                end = start + m2.start()
+                break
+        return T[start:end]
+
+    # A) Tasa fija (LECAP, BONCAP) — siempre existe
+    sec_tf = get_letra("A", ["B"])
     insts_tf = _extraer_tem_res(sec_tf) or _extraer_pesos_res(sec_tf, "pesos_fija")
     if insts_tf:
         bloques.append({"tipo":"pesos_fija",
             "titulo":"Instrumentos licitados denominados en pesos a tasa fija:",
             "instrumentos":insts_tf})
 
-    # B) CER (BONCER, LECER)
-    sec_cer = get_sec(r"B\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS CON AJUSTE POR CER",
-                      r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR")
+    # B) CER (BONCER, LECER) — puede tener 1 o varios instrumentos
+    sec_cer = get_letra("B", ["C"])
     insts_cer = _extraer_pesos_res(sec_cer, "cer")
     if insts_cer:
         bloques.append({"tipo":"cer",
@@ -994,34 +962,31 @@ def extraer_resultados_pdf(pdf_bytes):
             "instrumentos":insts_cer})
 
     # C) TAMAR (BOTAM, LETAM)
-    sec_tamar = get_sec(r"C\)\s*INSTRUMENTOS LICITADOS DENOMINADOS EN PESOS A TASA TAMAR",
-                        r"D\)\s*INSTRUMENTO")
+    sec_tamar = get_letra("C", ["D"])
     insts_tamar = _extraer_pesos_res(sec_tamar, "tamar")
     if insts_tamar:
         bloques.append({"tipo":"tamar",
             "titulo":"Instrumentos licitados denominados en pesos a tasa TAMAR:",
             "instrumentos":insts_tamar})
 
-    # D) DUAL CER/TAMAR
-    sec_dual = get_sec(r"D\)\s*INSTRUMENTO LICITADO DENOMINADO EN PESOS CER",
-                       r"E\)\s*INSTRUMENTOS LICITADOS")
-    insts_dual = _extraer_pesos_res(sec_dual, "dual")
+    # D) puede ser DUAL CER/TAMAR o directamente Dólar Linked (si no hay dual en la licitación)
+    sec_d = get_letra("D", ["E"])
+    insts_dual = _extraer_pesos_res(sec_d, "dual") if "DUAL" in sec_d else []
     if insts_dual:
         bloques.append({"tipo":"dual",
             "titulo":"Instrumento licitado denominado en pesos CER / TAMAR + 3%: ",
             "instrumentos":insts_dual})
 
-    # E) Dolar Linked (con fallback si no hay D de dual)
-    sec_lelink = get_sec(r"E\)\s*INSTRUMENTOS LICITADOS D[OÓ]LAR LINKED",
-                         r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N")
-    if not sec_lelink:
-        sec_lelink = get_sec(r"D\)\s*INSTRUMENTOS LICITADOS D[OÓ]LAR",
-                             r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N")
+    # E) Dólar Linked — si no hubo D) dual, la sección Dólar Linked puede estar en D) o E)
+    sec_lelink = get_letra("E", ["2"])
+    if not sec_lelink and "DUAL" not in sec_d:
+        sec_lelink = sec_d  # D) era directamente Dólar Linked
     insts_lelink = _extraer_usd_linked_res(sec_lelink)
 
     # 2) BONAR USD
-    sec_bonar = get_sec(r"2\)\s*INSTRUMENTOS DENOMINADOS Y CON INTEGRACI[OÓ]N EXCLUSIVAMENTE",
-                        r"B\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N")
+    m_bonar_ini = re.search(r"\b2\)\s*INSTRUMENTO", T)
+    m_bonar_fin = re.search(r"\bB\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N|BUENOS AIRES", T)
+    sec_bonar = T[m_bonar_ini.end(): m_bonar_fin.start()] if m_bonar_ini else ""
     insts_bonar = _extraer_bonar_res(sec_bonar)
 
     all_usd = insts_lelink + insts_bonar
@@ -1030,15 +995,17 @@ def extraer_resultados_pdf(pdf_bytes):
             "titulo":"Instrumento licitado denominado en dólares estadounidenses:",
             "instrumentos":all_usd})
 
-    # B) Canje
-    sec_canje = get_sec(r"B\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N",
-                        r"SE RECUERDA A LOS PARTICIPANTES|BUENOS AIRES")
-    insts_canje = _extraer_canje_res(sec_canje)
-    if insts_canje:
-        bloques.append({"tipo":"canje",
-            "titulo":"Conversión:",
-            "instrumentos":insts_canje,
-            "titulo_elegible":""})
+    # B) Canje — solo existe en algunas licitaciones
+    m_canje_ini = re.search(r"\bB\)\s*LICITACI[OÓ]N POR LA CONVERSI[OÓ]N", T)
+    if m_canje_ini:
+        m_canje_fin = re.search(r"SE RECUERDA A LOS PARTICIPANTES|BUENOS AIRES", T[m_canje_ini.end():])
+        sec_canje = T[m_canje_ini.end(): m_canje_ini.end()+m_canje_fin.start()] if m_canje_fin else T[m_canje_ini.end():]
+        insts_canje = _extraer_canje_res(sec_canje)
+        if insts_canje:
+            bloques.append({"tipo":"canje",
+                "titulo":"Conversión:",
+                "instrumentos":insts_canje,
+                "titulo_elegible":""})
     totales = {}
     # Ofertas: "3.437  194  3.631" (pesos, linked/usd, total)
     m = re.search(r"CANTIDAD DE OFERTAS RECIBIDAS\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)", T)
